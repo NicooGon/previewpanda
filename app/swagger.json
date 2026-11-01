@@ -1,0 +1,37 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PreviewPanda API",
+    "version": "1.0.0",
+    "description": "API mínima desplegada en un entorno efímero por Pull Request."
+  },
+  "servers": [
+    { "url": "/", "description": "Entorno actual" }
+  ],
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Información del entorno",
+        "responses": {
+          "200": { "description": "PR y commit desplegados" }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Estado de salud",
+        "responses": {
+          "200": { "description": "La aplicación responde correctamente" }
+        }
+      }
+    },
+    "/error": {
+      "get": {
+        "summary": "Error controlado para pruebas",
+        "responses": {
+          "500": { "description": "Error de prueba intencional" }
+        }
+      }
+    }
+  }
+}
