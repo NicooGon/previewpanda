@@ -1,0 +1,62 @@
+name: Destroy preview
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: preview-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    steps:
+      # TODO: reemplazar por auth WIF + terraform destroy + borrar imágenes
+      - name: Simular destroy
+        run: |
+          echo "Simulando destroy del PR ${{ github.event.pull_request.number }}..."
+          sleep 10
+
+      - name: Marcar comentario como destruido
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- preview-panda -->';
+            const merged = context.payload.pull_request.merged;
+
+            const body = [
+              marker,
+              '### Entorno de preview',
+              '',
+              `**Entorno destruido** (PR ${merged ? 'mergeado' : 'cerrado'})`,
+              `**Fecha:** ${new Date().toISOString()}`,
+            ].join('\n');
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              // Caso raro: el apply nunca llegó a comentar
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
