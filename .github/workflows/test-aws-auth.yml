@@ -1,16 +1,28 @@
 name: Test AWS auth
 
 on:
-  pull_request:          
+  pull_request:
 
 permissions:
-  id-token: write        
+  id-token: write   # Permite pedir el token OIDC
   contents: read
 
 jobs:
   auth:
     runs-on: ubuntu-latest
     steps:
+      # Temporal: muestra solo los claims, nunca el token
+      - name: Ver claims OIDC
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const claims = JSON.parse(
+              Buffer.from(token.split('.')[1], 'base64url').toString()
+            );
+            core.info(`sub: ${claims.sub}`);
+            core.info(`aud: ${claims.aud}`);
+
       - name: Asumir rol por OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -18,4 +30,4 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
 
       - name: Verificar identidad
-        run: aws sts get-caller-identity 
+        run: aws sts get-caller-identity
