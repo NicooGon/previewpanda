@@ -1,4 +1,7 @@
-node_modules/
-.env
-.npm-cache/
-
+.terraform/ 
+*.tfstate 
+*.tfstate.* 
+*.tfvars 
+*.tfvars.json 
+crash.log
+*.zip
