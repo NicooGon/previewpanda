@@ -1,3 +1,6 @@
+node_modules/
+.env
+.npm-cache/
 .terraform/ 
 *.tfstate 
 *.tfstate.* 
