@@ -1,11 +1,8 @@
-FROM node:22-alpine
+FROM public.ecr.aws/lambda/nodejs:22
 
-WORKDIR /app
+WORKDIR ${LAMBDA_TASK_ROOT}
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY . .
 
-ENV PORT=8080
-EXPOSE 8080
-
-CMD ["npm", "start"]
+CMD ["lambda.handler"]
