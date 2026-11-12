@@ -17,6 +17,7 @@ env:
   ENV_NAME: pr-${{ github.event.pull_request.number }}  # formato que valida infra/preview/variables.tf
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}   # commit real del PR (no el merge commit)
   TF_IN_AUTOMATION: "true"                             # salida de Terraform sin sugerencias interactivas
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}            # repo compartido de ECR (previewpanda)
 
 jobs:
   preview:
@@ -33,11 +34,55 @@ jobs:
           role-to-assume: ${{ vars.AWS_ROLE_ARN }}  # sin claves: solo el ARN del rol
           aws-region: ${{ vars.AWS_REGION }}
 
-      # Valida que la imagen de C construye; si falla, cortamos antes de tocar AWS
-      # TODO(ECR): login con aws-actions/amazon-ecr-login@v2, tag acordado
-      #            (pp-pr-<n>-<sha> o pr-<n>-<sha>) y docker push al repo vars.ECR_REPOSITORY
-      - name: Build de la imagen (sin push)
-        run: docker build -t "previewpanda:${ENV_NAME}-${HEAD_SHA::7}" app/
+      # Login al registry privado: el rol del OIDC pide un token temporal a ECR
+      # (sin usuario ni contraseña guardados) y deja docker autenticado
+      - name: Login a ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Arma el tag y la URI, y consulta si esa imagen ya está en ECR.
+      # El repo es IMMUTABLE: un segundo push del mismo tag falla, así que si ya
+      # existe (reapertura del PR o re-run del mismo commit) se reutiliza.
+      - name: Calcular tag y verificar si existe en ECR
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}  # 891762599659.dkr.ecr.us-east-1.amazonaws.com
+        run: |
+          # Formato del tag (provisorio, a confirmar con A y C): cambiarlo SOLO acá.
+          # Si cambia el prefijo, ajustar también PREFIX en destroy-preview.yml.
+          IMAGE_TAG="${ENV_NAME}-${HEAD_SHA::7}"
+          IMAGE_URI="${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+          # Distingue "no existe" de cualquier otro error (permisos, red):
+          # solo ImageNotFoundException habilita el build; lo demás corta el job
+          if out=$(aws ecr describe-images --repository-name "$ECR_REPOSITORY" \
+                     --image-ids imageTag="$IMAGE_TAG" 2>&1); then
+            echo "La imagen $IMAGE_TAG ya existe en ECR: se saltea build y push"
+            exists=true
+          elif grep -q ImageNotFoundException <<<"$out"; then
+            echo "La imagen $IMAGE_TAG no existe en ECR: se construye y se sube"
+            exists=false
+          else
+            echo "$out"
+            exit 1
+          fi
+
+          {
+            echo "tag=${IMAGE_TAG}"
+            echo "uri=${IMAGE_URI}"
+            echo "exists=${exists}"
+          } >> "$GITHUB_OUTPUT"
+
+      # Build y push solo si el tag es nuevo; con tag existente el paso aparece como "skipped"
+      - name: Build y push de la imagen
+        if: steps.image.outputs.exists == 'false'
+        env:
+          IMAGE_URI: ${{ steps.image.outputs.uri }}
+        run: |
+          # --provenance=false: imagen simple (sin índice OCI de attestations),
+          # que es el formato que acepta Lambda
+          docker build --provenance=false -t "$IMAGE_URI" app/
+          docker push "$IMAGE_URI"
 
       - name: Instalar Terraform
         uses: hashicorp/setup-terraform@v3
@@ -57,8 +102,10 @@ jobs:
         id: tf
         working-directory: infra/preview
         run: |
-          # TODO(A): agregar -var pr_number, -var commit_sha y -var image_uri
-          #          cuando existan en variables.tf y la Lambda use imagen
+          # TODO(A): cuando existan en variables.tf y la Lambda use imagen, agregar:
+          #   -var "pr_number=${{ github.event.pull_request.number }}"
+          #   -var "commit_sha=${HEAD_SHA}"
+          #   -var "image_uri=${{ steps.image.outputs.uri }}"
           # -lock-timeout: si otro proceso (ej. plan de calidad) tiene el lock, espera en vez de fallar
           terraform apply -auto-approve -input=false -lock-timeout=5m \
             -var "env_name=${ENV_NAME}"
@@ -69,6 +116,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           PREVIEW_URL: ${{ steps.tf.outputs.url }}  # output function_url del apply
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}  # tag de la imagen en ECR
         with:
           script: |
             // Marcador oculto para reconocer "nuestro" comentario
@@ -85,6 +133,7 @@ jobs:
               `**PR:** #${pr.number} · **Entorno:** \`pr-${pr.number}\``,
               `**URL:** ${process.env.PREVIEW_URL}`,
               `**Commit:** [\`${sha.substring(0, 7)}\`](${commitUrl})`,
+              `**Imagen:** \`${process.env.IMAGE_TAG}\``,
               `**Actualizado:** ${new Date().toISOString()}`,
             ].join('\n');
 

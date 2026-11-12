@@ -18,6 +18,7 @@ env:
   ENV_NAME: pr-${{ github.event.pull_request.number }}
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
   TF_IN_AUTOMATION: "true"
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}  # repo compartido de ECR (previewpanda)
 
 jobs:
   destroy:
@@ -66,8 +67,40 @@ jobs:
           # Idempotente: si la key no existe (apply nunca corrió), no falla
           aws s3 rm "s3://${{ vars.TF_STATE_BUCKET }}/previews/${ENV_NAME}/terraform.tfstate"
 
-      # TODO(ECR): borrar las imágenes del PR en vars.ECR_REPOSITORY
-      #            (aws ecr batch-delete-image filtrando por el tag acordado)
+      - name: Borrar imágenes del PR en ECR
+        # Sin `if:` → solo si el destroy salió bien: si falló, la Lambda puede
+        # seguir usando la imagen y se conserva junto con el state.
+        run: |
+          # Debe coincidir con el inicio de IMAGE_TAG en preview.yml (pr-<n>-<sha7>).
+          # El guion final evita que pr-1- también agarre pr-14-..., pr-15-...
+          PREFIX="${ENV_NAME}-"
+
+          # Tags del PR; la CLI recorre todas las páginas y filtra con JMESPath
+          tags=$(aws ecr list-images --repository-name "$ECR_REPOSITORY" \
+                   --filter tagStatus=TAGGED \
+                   --query "imageIds[?starts_with(imageTag, '${PREFIX}')].imageTag" \
+                   --output text)
+
+          # Sin imágenes (el build nunca corrió o ya se borraron): no es error
+          if [ -z "$tags" ] || [ "$tags" = "None" ]; then
+            echo "No hay imágenes ${PREFIX}* en ECR"
+            exit 0
+          fi
+
+          # Una entrada imageTag=<tag> por imagen (máximo 100 por llamada;
+          # la lifecycle deja 10, así que alcanza)
+          ids=()
+          for t in $tags; do ids+=("imageTag=$t"); done
+          echo "Borrando: $tags"
+
+          # batch-delete-image devuelve 0 aunque falle alguna: se revisa `failures`
+          failures=$(aws ecr batch-delete-image --repository-name "$ECR_REPOSITORY" \
+                       --image-ids "${ids[@]}" --query 'length(failures)' --output text)
+          if [ "$failures" != "0" ]; then
+            echo "No se pudieron borrar $failures imágenes"
+            exit 1
+          fi
+
       # TODO(CSV): registrar la destrucción en docs/environments.csv (PR, fecha, horas de vida)
 
       - name: Actualizar comentario del PR
@@ -89,7 +122,7 @@ jobs:
               '',
               `**PR:** #${pr.number} (${pr.merged ? 'mergeado' : 'cerrado'}) · **Entorno:** \`pr-${pr.number}\``,
               ok
-                ? '**Entorno destruido** (recursos y state eliminados)'
+                ? '**Entorno destruido** (recursos, state e imágenes eliminados)'
                 : `**Falló el destroy:** pueden quedar recursos de \`pp-pr-${pr.number}\` ([ver run](${runUrl}))`,
               `**Fecha:** ${new Date().toISOString()}`,
             ].join('\n');
