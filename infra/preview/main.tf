@@ -26,6 +26,11 @@ data "archive_file" "lambda_zip" {
   output_path = "${path.module}/lambda_function.zip"
 }
 
+resource "aws_cloudwatch_log_group" "app_logs" {
+  name              = "/aws/lambda/pp-${var.env_name}"
+  retention_in_days = 7
+}
+
 resource "aws_lambda_function" "app" {
   function_name = "pp-${var.env_name}"
   role          = aws_iam_role.lambda_exec.arn
@@ -35,11 +40,8 @@ resource "aws_lambda_function" "app" {
 
   handler = "lambda_function.lambda_handler"
   runtime = "python3.13"
-}
 
-resource "aws_cloudwatch_log_group" "app_logs" {
-  name              = "/aws/lambda/${aws_lambda_function.app.function_name}"
-  retention_in_days = 7
+  depends_on = [aws_cloudwatch_log_group.app_logs]
 }
 
 resource "aws_lambda_function_url" "app_url" {
