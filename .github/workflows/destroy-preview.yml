@@ -2,38 +2,95 @@ name: Destroy preview
 
 on:
   pull_request:
-    types: [closed]
+    types: [closed]  # cubre cerrado y mergeado
 
 permissions:
-  contents: read
-  pull-requests: write
+  id-token: write       # OIDC hacia AWS
+  contents: read        # checkout del código de infra
+  pull-requests: write  # editar el comentario
 
+# Mismo grupo que preview.yml: si hay un apply corriendo, el destroy espera a que termine
 concurrency:
   group: preview-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
+
+env:
+  ENV_NAME: pr-${{ github.event.pull_request.number }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  TF_IN_AUTOMATION: "true"
 
 jobs:
   destroy:
     runs-on: ubuntu-latest
     steps:
-      # TODO: reemplazar por auth WIF + terraform destroy + borrar imágenes
-      - name: Simular destroy
-        run: |
-          echo "Simulando destroy del PR ${{ github.event.pull_request.number }}..."
-          sleep 10
+      - name: Checkout del commit del PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}  # mismo código que hizo el apply; sigue accesible aunque borren la rama
 
-      - name: Marcar comentario como destruido
+      - name: Asumir rol por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.x
+          terraform_wrapper: false
+
+      - name: Terraform init (state del PR)
+        working-directory: infra/preview
+        run: |
+          # Misma key que el apply; si el state no existe, init igual funciona
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=previews/${ENV_NAME}/terraform.tfstate"
+
+      - name: Terraform destroy
+        id: destroy
+        working-directory: infra/preview
+        run: |
+          # Con state vacío (apply nunca corrió) termina OK sin borrar nada;
+          # con apply a medias borra solo lo que quedó registrado
+          # TODO(A): agregar -var pr_number/commit_sha/image_uri cuando existan
+          #          (si no tienen default, destroy también los exige)
+          terraform destroy -auto-approve -input=false -lock-timeout=5m \
+            -var "env_name=${ENV_NAME}"
+
+      - name: Borrar el state del PR en S3
+        # Sin `if:` → solo corre si el destroy (y todo lo anterior) salió bien.
+        # Si el destroy falla, el state se conserva para reintentar o para el nightly.
+        run: |
+          # Idempotente: si la key no existe (apply nunca corrió), no falla
+          aws s3 rm "s3://${{ vars.TF_STATE_BUCKET }}/previews/${ENV_NAME}/terraform.tfstate"
+
+      # TODO(ECR): borrar las imágenes del PR en vars.ECR_REPOSITORY
+      #            (aws ecr batch-delete-image filtrando por el tag acordado)
+      # TODO(CSV): registrar la destrucción en docs/environments.csv (PR, fecha, horas de vida)
+
+      - name: Actualizar comentario del PR
+        if: always()  # siempre: también tiene que avisar si el destroy falló
         uses: actions/github-script@v7
+        env:
+          # success solo si OIDC, init, destroy y borrado del state salieron bien
+          JOB_STATUS: ${{ job.status }}
         with:
           script: |
             const marker = '<!-- preview-panda -->';
-            const merged = context.payload.pull_request.merged;
+            const pr = context.payload.pull_request;
+            const ok = process.env.JOB_STATUS === 'success';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
 
             const body = [
               marker,
               '### Entorno de preview',
               '',
-              `**Entorno destruido** (PR ${merged ? 'mergeado' : 'cerrado'})`,
+              `**PR:** #${pr.number} (${pr.merged ? 'mergeado' : 'cerrado'}) · **Entorno:** \`pr-${pr.number}\``,
+              ok
+                ? '**Entorno destruido** (recursos y state eliminados)'
+                : `**Falló el destroy:** pueden quedar recursos de \`pp-pr-${pr.number}\` ([ver run](${runUrl}))`,
               `**Fecha:** ${new Date().toISOString()}`,
             ].join('\n');
 

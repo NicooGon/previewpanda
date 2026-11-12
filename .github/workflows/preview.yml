@@ -5,41 +5,86 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  contents: read
-  pull-requests: write
+  id-token: write       # OIDC: GitHub emite el token para asumir el rol en AWS
+  contents: read        # checkout del código
+  pull-requests: write  # crear/editar el comentario del preview
 
 concurrency:
   group: preview-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
+env:
+  ENV_NAME: pr-${{ github.event.pull_request.number }}  # formato que valida infra/preview/variables.tf
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}   # commit real del PR (no el merge commit)
+  TF_IN_AUTOMATION: "true"                             # salida de Terraform sin sugerencias interactivas
+
 jobs:
   preview:
     runs-on: ubuntu-latest
     steps:
-      # TODO: reemplazar por auth WIF + docker build/push + terraform apply
-      - name: Simular apply
-        id: fake
+      - name: Checkout del commit del PR
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.HEAD_SHA }}  # evita depender de refs/pull/<n>/merge (no existe si hay conflictos)
+
+      - name: Asumir rol por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}  # sin claves: solo el ARN del rol
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # Valida que la imagen de C construye; si falla, cortamos antes de tocar AWS
+      # TODO(ECR): login con aws-actions/amazon-ecr-login@v2, tag acordado
+      #            (pp-pr-<n>-<sha> o pr-<n>-<sha>) y docker push al repo vars.ECR_REPOSITORY
+      - name: Build de la imagen (sin push)
+        run: docker build -t "previewpanda:${ENV_NAME}-${HEAD_SHA::7}" app/
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.x  # use_lockfile (backend.tf) requiere >= 1.11
+          terraform_wrapper: false   # sin wrapper para que `output -raw` devuelva solo el valor
+
+      - name: Terraform init (state propio del PR)
+        working-directory: infra/preview
         run: |
-          echo "Simulando apply del PR ${{ github.event.pull_request.number }}..."
-          sleep 60   # para poder probar la concurrencia con dos pushes seguidos
-          echo "url=https://pr-${{ github.event.pull_request.number }}.ejemplo.com" >> "$GITHUB_OUTPUT"
+          # La key de backend.tf (pr-1) se pisa acá: un state por PR
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=previews/${ENV_NAME}/terraform.tfstate"
+
+      - name: Terraform apply
+        id: tf
+        working-directory: infra/preview
+        run: |
+          # TODO(A): agregar -var pr_number, -var commit_sha y -var image_uri
+          #          cuando existan en variables.tf y la Lambda use imagen
+          # -lock-timeout: si otro proceso (ej. plan de calidad) tiene el lock, espera en vez de fallar
+          terraform apply -auto-approve -input=false -lock-timeout=5m \
+            -var "env_name=${ENV_NAME}"
+          # URL pública de la Lambda, para el comentario del PR
+          echo "url=$(terraform output -raw function_url)" >> "$GITHUB_OUTPUT"
 
       - name: Comentar URL en el PR
         uses: actions/github-script@v7
         env:
-          PREVIEW_URL: ${{ steps.fake.outputs.url }}
+          PREVIEW_URL: ${{ steps.tf.outputs.url }}  # output function_url del apply
         with:
           script: |
             // Marcador oculto para reconocer "nuestro" comentario
             const marker = '<!-- preview-panda -->';
-            const sha = context.payload.pull_request.head.sha.substring(0, 7);
+            const pr = context.payload.pull_request;
+            const sha = pr.head.sha;
+            // Link al commit desplegado (head del PR, no el merge commit)
+            const commitUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${sha}`;
 
             const body = [
               marker,
               '### Entorno de preview',
               '',
+              `**PR:** #${pr.number} · **Entorno:** \`pr-${pr.number}\``,
               `**URL:** ${process.env.PREVIEW_URL}`,
-              `**Commit:** \`${sha}\``,
+              `**Commit:** [\`${sha.substring(0, 7)}\`](${commitUrl})`,
               `**Actualizado:** ${new Date().toISOString()}`,
             ].join('\n');
 
@@ -69,4 +114,53 @@ jobs:
                 body,
               });
               core.info('Comentario creado');
+            }
+
+      # TODO(CSV): registrar la creación en docs/environments.csv
+      #            (PR, fecha, commit). Falta acordar con C cómo, porque main está protegido.
+
+      # Si cualquier paso anterior falló, el comentario no debe seguir mostrando
+      # la URL/commit viejos como si estuvieran actualizados
+      - name: Marcar comentario como fallido
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- preview-panda -->';
+            const pr = context.payload.pull_request;
+            // Link al run para ver qué paso falló
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+
+            const body = [
+              marker,
+              '### Entorno de preview',
+              '',
+              `**PR:** #${pr.number} · **Entorno:** \`pr-${pr.number}\``,
+              `**Estado:** falló el despliegue del commit \`${pr.head.sha.substring(0, 7)}\``,
+              `**Detalle:** [ver run](${runUrl})`,
+              `**Actualizado:** ${new Date().toISOString()}`,
+            ].join('\n');
+
+            // Misma lógica que el comentario normal: editar si existe, crear si no
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body?.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
             }
