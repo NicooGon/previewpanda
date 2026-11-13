@@ -4,14 +4,11 @@
     {
       "Sid": "TerraformStateBucket",
       "Effect": "Allow",
-      "Action": ["s3:ListBucket"],
-      "Resource": "arn:aws:s3:::previewpanda-tfstate-nico2026"
-    },
-    {
-      "Sid": "TerraformStateObjects",
-      "Effect": "Allow",
-      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
-      "Resource": "arn:aws:s3:::previewpanda-tfstate-nico2026/*"
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::previewpanda-tfstate-nico2026",
+        "arn:aws:s3:::previewpanda-tfstate-nico2026/*"
+      ]
     },
     {
       "Sid": "IamRolesPreviewPanda",
@@ -25,45 +22,51 @@
         "iam:AttachRolePolicy",
         "iam:DetachRolePolicy",
         "iam:ListAttachedRolePolicies",
-        "iam:PassRole"
+        "iam:ListRolePolicies",
+        "iam:ListInstanceProfilesForRole"
       ],
       "Resource": "arn:aws:iam::891762599659:role/pp-*"
     },
     {
+      "Sid": "IamPassRoleToLambda",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::891762599659:role/pp-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": "lambda.amazonaws.com"
+        }
+      }
+    },
+    {
       "Sid": "LambdaPreviewPanda",
       "Effect": "Allow",
-      "Action": [
-        "lambda:CreateFunction",
-        "lambda:DeleteFunction",
-        "lambda:GetFunction",
-        "lambda:UpdateFunctionCode",
-        "lambda:UpdateFunctionConfiguration",
-        "lambda:TagResource",
-        "lambda:ListTags",
-        "lambda:UntagResource",
-        "lambda:CreateFunctionUrlConfig",
-        "lambda:DeleteFunctionUrlConfig",
-        "lambda:GetFunctionUrlConfig",
-        "lambda:UpdateFunctionUrlConfig",
-        "lambda:AddPermission",
-        "lambda:RemovePermission",
-        "lambda:GetPolicy"
-      ],
+      "Action": "lambda:*",
       "Resource": "arn:aws:lambda:us-east-1:891762599659:function:pp-*"
     },
     {
       "Sid": "LogsPreviewPanda",
       "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogGroup",
-        "logs:DeleteLogGroup",
-        "logs:PutRetentionPolicy",
-        "logs:DescribeLogGroups",
-        "logs:TagResource",
-        "logs:ListTagsForResource",
-        "logs:UntagResource"
-      ],
+      "Action": "logs:*",
       "Resource": "arn:aws:logs:us-east-1:891762599659:log-group:/aws/lambda/pp-*"
+    },
+    {
+      "Sid": "LogsDescribe",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
+    },
+    {
+      "Sid": "EcrPreviewPanda",
+      "Effect": "Allow",
+      "Action": "ecr:*",
+      "Resource": "arn:aws:ecr:us-east-1:891762599659:repository/previewpanda"
+    },
+    {
+      "Sid": "EcrAuthToken",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
     }
   ]
 }
