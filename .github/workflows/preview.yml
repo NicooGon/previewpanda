@@ -15,6 +15,7 @@ concurrency:
 
 env:
   ENV_NAME: pr-${{ github.event.pull_request.number }}  # formato que valida infra/preview/variables.tf
+  PR_NUMBER: ${{ github.event.pull_request.number }}    # solo el número: etiqueta pr=<n> (variables.tf valida ^[0-9]+$)
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}   # commit real del PR (no el merge commit)
   TF_IN_AUTOMATION: "true"                             # salida de Terraform sin sugerencias interactivas
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}            # repo compartido de ECR (previewpanda)
@@ -103,12 +104,12 @@ jobs:
         working-directory: infra/preview
         run: |
           # TODO(A): cuando existan en variables.tf y la Lambda use imagen, agregar:
-          #   -var "pr_number=${{ github.event.pull_request.number }}"
           #   -var "commit_sha=${HEAD_SHA}"
           #   -var "image_uri=${{ steps.image.outputs.uri }}"
           # -lock-timeout: si otro proceso (ej. plan de calidad) tiene el lock, espera en vez de fallar
           terraform apply -auto-approve -input=false -lock-timeout=5m \
-            -var "env_name=${ENV_NAME}"
+            -var "env_name=${ENV_NAME}" \
+            -var "pr_number=${PR_NUMBER}"  # sin esto Terraform usa el default "1" y todo queda pr=1
           # URL pública de la Lambda, para el comentario del PR
           echo "url=$(terraform output -raw function_url)" >> "$GITHUB_OUTPUT"
 
