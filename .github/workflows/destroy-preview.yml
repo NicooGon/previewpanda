@@ -56,8 +56,7 @@ jobs:
         run: |
           # Con state vacío (apply nunca corrió) termina OK sin borrar nada;
           # con apply a medias borra solo lo que quedó registrado
-          # TODO(A): agregar -var commit_sha/image_uri cuando existan
-          #          (si no tienen default, destroy también los exige)
+          # commit_sha e image_uri no se pasan (default null)
           # pr_number: mismas variables que el apply, por si A le saca el default
           terraform destroy -auto-approve -input=false -lock-timeout=5m \
             -var "env_name=${ENV_NAME}" \
