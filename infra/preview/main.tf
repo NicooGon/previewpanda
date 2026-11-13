@@ -55,6 +55,8 @@ resource "aws_lambda_permission" "public_url_access" {
   function_name          = aws_lambda_function.app.function_name
   principal              = "*"
   function_url_auth_type = "NONE"
+
+  depends_on = [aws_lambda_function_url.app_url]
 }
 
 resource "aws_lambda_permission" "public_invoke_access" {
@@ -62,4 +64,6 @@ resource "aws_lambda_permission" "public_invoke_access" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.app.function_name
   principal     = "*"
+
+  depends_on = [aws_lambda_permission.public_url_access]
 }
