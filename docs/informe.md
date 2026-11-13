@@ -270,9 +270,17 @@ El informe utilizará dos diagramas:
 1. **Diagrama de secuencia:** muestra apertura/actualización/cierre del PR y la interacción entre GitHub, Actions, ECR, Terraform, Lambda y S3.
 2. **Diagrama de despliegue:** muestra los límites entre GitHub, AWS, ECR, S3, Lambda, Function URL y CloudWatch.
 
-Los archivos PlantUML son [secuencia.puml](secuencia.puml),
-[secuencia-quality.puml](secuencia-quality.puml) y
-[despliegue.puml](despliegue.puml).
+```text
+diagrama 1
+```
+
+```text
+diagrama 2
+```
+
+```text
+diagrama 3
+```
 
 ## 12. Estado actual y trabajo pendiente
 
