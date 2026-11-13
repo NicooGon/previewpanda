@@ -23,13 +23,13 @@ El objetivo principal no es desarrollar una aplicación compleja, sino demostrar
 
 | # | Requisito | Evidencia esperada | Estado |
 |---:|---|---|---|
-| 1 | Cada PR tiene su propio entorno y URL | Lambda `pp-pr-<n>` con Function URL propia | Pendiente de Terraform |
-| 2 | El entorno se destruye al cerrar o mergear | `terraform destroy` y limpieza de recursos | Pendiente de workflow |
-| 3 | Módulo Terraform reutilizable | Variable `env_name` | Pendiente de `infra/` |
-| 4 | Un state por entorno | S3 key `previews/pr-<n>/terraform.tfstate` | Preparado por Persona A |
-| 5 | Etiqueta `pr=<n>` | Tags en los recursos creados | Pendiente de verificar |
+| 1 | Cada PR tiene su propio entorno y URL | Lambda `pp-pr-<n>` con Function URL propia | Verificado en PR de demostración |
+| 2 | El entorno se destruye al cerrar o mergear | `terraform destroy` y limpieza de recursos | Verificado en PR de demostración |
+| 3 | Módulo Terraform reutilizable | Variable `env_name` | Implementado |
+| 4 | Un state por entorno | S3 key `previews/pr-<n>/terraform.tfstate` | Implementado |
+| 5 | Etiqueta `pr=<n>` | Tags en los recursos creados | Implementado |
 | 6 | Limpieza nocturna de huérfanos | Workflow que destruye previews con más de 3 días | Pendiente de workflow |
-| 7 | Política de concurrencia | Grupo `preview-pr-<n>` probado con pushes sucesivos | Pendiente de workflow |
+| 7 | Política de concurrencia | Grupo `preview-pr-<n>` probado con pushes sucesivos | Implementado y probado |
 | 8 | Registro y costo por entorno | `docs/environments.csv` actualizado por workflows | Plantilla creada |
 
 ## 3. Alcance de la aplicación
@@ -75,7 +75,7 @@ Respuesta esperada:
 }
 ```
 
-El valor de `pr` debe coincidir con el Pull Request probado y `commit` debe identificar el commit usado para construir la imagen. En local, si no se configuran variables, se muestran los valores de respaldo `local` y `dev`.
+El valor de `pr` debe coincidir con el Pull Request probado y `commit` debe identificar el commit usado para construir la imagen. En local, si no se configuran variables, se muestran los valores `NOT_CONFIGURED`.
 
 ### `GET /health`
 
@@ -111,10 +111,9 @@ HTTP 500
 }
 ```
 
-El error es intencional. En AWS debe aparecer en los logs de CloudWatch. Para
-que la alarma pueda dispararse de forma confiable, se debe acordar con Persona
-A un filtro de métrica para una marca específica del error, por ejemplo
-`preview_test_error`; un `HTTP 500` controlado no necesariamente incrementa la
+El error es intencional. En AWS aparece en los logs de CloudWatch con la marca
+`preview_test_error`. La alarma de la demo utiliza un filtro de métrica sobre
+esa marca, porque un `HTTP 500` controlado no necesariamente incrementa la
 métrica nativa `AWS/Lambda Errors`.
 
 ### `GET /api-docs`
@@ -200,7 +199,18 @@ La aplicación dispone de `/error` para provocar una respuesta HTTP 500 controla
 3. Comprobar que la métrica configurada para el error de prueba aumenta.
 4. Verificar la alarma de CloudWatch.
 
-La alarma y el dashboard son tareas de la semana 3 y todavía están pendientes de integración en Terraform.
+El dashboard y la alarma se crearon en CloudWatch para el PR de demostración.
+La alarma usa la métrica personalizada `PreviewTestErrors`, que se incrementa
+al invocar `/error`. La retención del log group es de 7 días.
+
+En la ejecución de demostración del PR #24 se utilizó la imagen
+`pr-24-626cda2`.
+
+Esta configuración manual está verificada en AWS y sirve para la demostración.
+Por indicación del docente, el dashboard y la alarma se configuraron
+directamente desde la consola de AWS. La evidencia debe mostrar el dashboard,
+la alarma en estado de alarma después de invocar `/error` y la retención de
+logs de 7 días.
 
 Los log groups temporales deberán conservarse durante 7 días.
 
@@ -220,7 +230,7 @@ La matriz IAM definitiva deberá documentar:
 
 ## 9. FinOps
 
-La estimación inicial del proyecto es de aproximadamente **USD 0–2 por mes**, siempre que los previews se destruyan correctamente y no se mantengan recursos costosos encendidos.
+La estimación inicial del proyecto es de aproximadamente **USD 0–2 por mes**, siempre que los previews se destruyan correctamente y no se mantengan recursos costosos encendidos. El detalle de supuestos y evidencias está en [docs/finops.md](finops.md).
 
 Las medidas principales de ahorro son:
 
@@ -232,17 +242,26 @@ Las medidas principales de ahorro son:
 - Limpieza nocturna de huérfanos.
 - Retención de logs limitada a 7 días.
 
-El costo real y la proyección productiva deberán completarse con la facturación de AWS o una herramienta de estimación como Infracost.
+Cost Explorer mostró un costo observado de USD 0,00 para la ventana
+12/11/2026–13/11/2026 en los servicios consultados. Ese dato corresponde a la
+cuenta y no permite atribuir un importe exacto al PR #24. Además, está activo
+el presupuesto mensual `previewpanda-presupuesto` por USD 10,00, con tres
+destinatarios verificados y tres alertas asociadas por destinatario. La pestaña
+de alertas confirma los umbrales 50 % (USD 5,00), 80 % (USD 8,00) y
+100 % (USD 10,00), todos sin superar. La proyección productiva se mantiene
+como estimación del alcance.
 
 ## 10. Registro de entornos
 
-El archivo [environments.csv](environments.csv) contiene la plantilla inicial con estos campos:
+El archivo [environments.csv](environments.csv) contiene la plantilla con estos campos:
 
 ```text
 pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_cost_usd,notes
 ```
 
-Los workflows deberán agregar una fila al crear y otra al destruir cada entorno.
+Los workflows todavía conservan el punto de integración para agregar una fila al
+crear y otra al destruir cada entorno. El archivo no debe rellenarse con URL o
+costos inventados: las filas finales deben salir de ejecuciones reales.
 
 ## 11. Diagramas
 
@@ -250,6 +269,10 @@ El informe utilizará dos diagramas:
 
 1. **Diagrama de secuencia:** muestra apertura/actualización/cierre del PR y la interacción entre GitHub, Actions, ECR, Terraform, Lambda y S3.
 2. **Diagrama de despliegue:** muestra los límites entre GitHub, AWS, ECR, S3, Lambda, Function URL y CloudWatch.
+
+Los archivos PlantUML son [secuencia.puml](secuencia.puml),
+[secuencia-quality.puml](secuencia-quality.puml) y
+[despliegue.puml](despliegue.puml).
 
 ## 12. Estado actual y trabajo pendiente
 
@@ -264,14 +287,10 @@ El informe utilizará dos diagramas:
 
 ### Pendiente de integración (WIP)
 
-- Infraestructura Terraform.
-- Publicación en ECR mediante workflow.
-- Lambda real y Function URL.
-- Workflow de apply y comentario del PR.
-- Workflow de destroy y eliminación del state.
+- Automatización final del CSV en los workflows.
 - Job nocturno de huérfanos.
-- Dashboard y alarma de CloudWatch.
-- Costos reales y evidencias de la demo.
+- Evidencias finales de la demo.
+- Archivos PlantUML de los diagramas de secuencia y despliegue.
 
 ## 13. Evidencias para la entrega (TO-DO)
 
@@ -292,4 +311,7 @@ La demostración final deberá conservar evidencia de:
 
 PreviewPanda implementa un patrón de entornos efímeros orientado a Pull Requests. La aplicación es pequeña a propósito: permite concentrar la evaluación en Terraform, aislamiento de states, CI/CD, autenticación federada, observabilidad y control de costos.
 
-La aplicación y su imagen ya están preparadas para Lambda. El handler `lambda.handler` queda declarado en el `CMD` del Dockerfile; el workflow solo debe construir y publicar la imagen, y Terraform debe crear la Lambda usando esa imagen. La validación completa del proyecto comenzará cuando se integren los módulos Terraform de Persona A y los workflows de Persona B.
+La aplicación, la imagen, la infraestructura principal y los workflows de
+preview ya están integrados. El trabajo restante se concentra en cerrar el
+registro de entornos, el job nocturno, los diagramas, las evidencias y la
+documentación final.
