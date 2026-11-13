@@ -56,7 +56,7 @@ jobs:
         run: |
           # Con state vacío (apply nunca corrió) termina OK sin borrar nada;
           # con apply a medias borra solo lo que quedó registrado
-          # commit_sha e image_uri no se pasan (default null)
+          # commit_sha e image_uri no se pasan (tienen default)
           # pr_number: mismas variables que el apply, por si A le saca el default
           terraform destroy -auto-approve -input=false -lock-timeout=5m \
             -var "env_name=${ENV_NAME}" \

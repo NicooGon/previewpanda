@@ -20,14 +20,14 @@ variable "pr_number" {
   }
 }
 
-# Default null para que el destroy funcione solo con env_name
+# Placeholder: el provider exige image_uri incluso en el destroy
 variable "image_uri" {
   description = "URI de la imagen en ECR con tag (ej: <cuenta>.dkr.ecr.us-east-1.amazonaws.com/previewpanda:pr-23-abc1234)"
   type        = string
-  default     = null
+  default     = "NOT_CONFIGURED"
 
   validation {
-    condition     = var.image_uri == null || can(regex("^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/[a-z0-9._/-]+:[A-Za-z0-9._-]+$", var.image_uri))
+    condition     = var.image_uri == "NOT_CONFIGURED" || can(regex("^[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.amazonaws\\.com/[a-z0-9._/-]+:[A-Za-z0-9._-]+$", var.image_uri))
     error_message = "image_uri debe ser una URI de ECR con tag, por ejemplo 123456789012.dkr.ecr.us-east-1.amazonaws.com/previewpanda:pr-23-abc1234."
   }
 }
