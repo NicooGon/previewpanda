@@ -1,18 +1,19 @@
 import json
+import os
 import subprocess
 from datetime import datetime, timezone
 
 NOMBRE_DEL_BUCKET = "previewpanda-tfstate-nico2026"
 CARPETA_DE_PREVIEWS = "previews/"
-DIAS_LIMITE = 3
+DIAS_LIMITE = int(os.environ.get("DIAS_LIMITE", "3"))
 CARPETA_DEL_MODULO_TERRAFORM = "infra/preview"
 REPOSITORIO_GITHUB = "NicooGon/previewpanda"
+NOMBRE_DEL_REPOSITORIO_ECR = "previewpanda"
 
 
 def obtener_lista_de_entornos():
     """Busca en AWS que archivos de state hay guardados."""
 
-    # Comando de AWS para listar los archivos del bucket.
     comando = [
         "aws", "s3api", "list-objects-v2",
         "--bucket", NOMBRE_DEL_BUCKET,
@@ -21,8 +22,6 @@ def obtener_lista_de_entornos():
     ]
 
     resultado = subprocess.run(comando, capture_output=True, text=True, check=True)
-
-    # AWS devuelve JSON como texto; esto lo convierte en datos de Python.
     respuesta_completa = json.loads(resultado.stdout)
     lista_de_archivos = respuesta_completa.get("Contents", [])
 
@@ -42,7 +41,6 @@ def obtener_lista_de_entornos():
 
         numero_de_pr = nombre_de_la_carpeta[3:]
 
-        # AWS da la fecha en texto; la convertimos para poder restarla.
         fecha_de_modificacion = datetime.fromisoformat(archivo["LastModified"])
         ahora = datetime.now(timezone.utc)
         dias_sin_cambios = (ahora - fecha_de_modificacion).days
@@ -57,8 +55,12 @@ def obtener_lista_de_entornos():
     return entornos
 
 
-def el_pull_request_esta_abierto(numero_de_pr):
-    """Pregunta a GitHub si ese PR sigue abierto."""
+def consultar_estado_del_pr(numero_de_pr):
+    """
+    Pregunta a GitHub por ese PR.
+    Devuelve "OPEN", "CERRADO" o "DESCONOCIDO" (si gh fallo por otra razon
+    que no sea "el PR no existe").
+    """
 
     comando = [
         "gh", "pr", "view", numero_de_pr,
@@ -69,11 +71,58 @@ def el_pull_request_esta_abierto(numero_de_pr):
 
     resultado = subprocess.run(comando, capture_output=True, text=True)
 
-    if resultado.returncode != 0:
-        return False
+    if resultado.returncode == 0:
+        estado = resultado.stdout.strip()
+        return "OPEN" if estado == "OPEN" else "CERRADO"
 
-    estado = resultado.stdout.strip()
-    return estado == "OPEN"
+    error = resultado.stderr.lower()
+    if "could not resolve" in error or "no pull requests found" in error:
+        return "CERRADO"
+
+    return "DESCONOCIDO"
+
+
+def borrar_el_archivo_de_state(ruta_del_archivo):
+    """Borra el archivo de state en S3 despues de destruir el entorno."""
+
+    subprocess.run(
+        [
+            "aws", "s3api", "delete-object",
+            "--bucket", NOMBRE_DEL_BUCKET,
+            "--key", ruta_del_archivo,
+        ],
+        check=True,
+    )
+
+
+def borrar_las_imagenes_del_pr(numero_de_pr):
+    """Borra en ECR las imagenes que pertenecen a este PR (tag pr-<n>-<sha>)."""
+
+    prefijo_del_tag = "pr-" + numero_de_pr + "-"
+
+    comando_listar = [
+        "aws", "ecr", "list-images",
+        "--repository-name", NOMBRE_DEL_REPOSITORIO_ECR,
+        "--output", "json",
+    ]
+    resultado = subprocess.run(comando_listar, capture_output=True, text=True, check=True)
+    imagenes = json.loads(resultado.stdout).get("imageIds", [])
+
+    imagenes_del_pr = [
+        imagen for imagen in imagenes
+        if imagen.get("imageTag", "").startswith(prefijo_del_tag)
+    ]
+
+    if not imagenes_del_pr:
+        return
+
+    comando_borrar = [
+        "aws", "ecr", "batch-delete-image",
+        "--repository-name", NOMBRE_DEL_REPOSITORIO_ECR,
+        "--image-ids", json.dumps(imagenes_del_pr),
+    ]
+    subprocess.run(comando_borrar, check=True)
+    print("Imagenes de ECR borradas:", [i["imageTag"] for i in imagenes_del_pr])
 
 
 def destruir_entorno(numero_de_pr, ruta_del_archivo):
@@ -102,6 +151,9 @@ def destruir_entorno(numero_de_pr, ruta_del_archivo):
         check=True,
     )
 
+    borrar_el_archivo_de_state(ruta_del_archivo)
+    borrar_las_imagenes_del_pr(numero_de_pr)
+
 
 def main():
     """Revisa todos los entornos y destruye los huerfanos."""
@@ -115,8 +167,14 @@ def main():
         dias_sin_cambios = entorno["dias_sin_cambios"]
         nombre_del_entorno = "pr-" + numero_de_pr
 
-        if el_pull_request_esta_abierto(numero_de_pr):
+        estado_del_pr = consultar_estado_del_pr(numero_de_pr)
+
+        if estado_del_pr == "OPEN":
             print(nombre_del_entorno, "-> el PR sigue abierto, no se toca.")
+            continue
+
+        if estado_del_pr == "DESCONOCIDO":
+            print(nombre_del_entorno, "-> no se pudo confirmar el estado del PR, no se toca.")
             continue
 
         if dias_sin_cambios <= DIAS_LIMITE:
