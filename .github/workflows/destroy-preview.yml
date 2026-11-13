@@ -16,7 +16,6 @@ concurrency:
 
 env:
   ENV_NAME: pr-${{ github.event.pull_request.number }}
-  PR_NUMBER: ${{ github.event.pull_request.number }}  # mismo valor que el apply
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}
   TF_IN_AUTOMATION: "true"
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}  # repo compartido de ECR (previewpanda)
@@ -56,11 +55,9 @@ jobs:
         run: |
           # Con state vacío (apply nunca corrió) termina OK sin borrar nada;
           # con apply a medias borra solo lo que quedó registrado
-          # commit_sha e image_uri no se pasan (tienen default)
-          # pr_number: mismas variables que el apply, por si A le saca el default
+          # commit_sha, image_uri y pr_number no se pasan (tienen default; pr_number se eliminó, se deriva de env_name)
           terraform destroy -auto-approve -input=false -lock-timeout=5m \
-            -var "env_name=${ENV_NAME}" \
-            -var "pr_number=${PR_NUMBER}"
+            -var "env_name=${ENV_NAME}"
 
       - name: Borrar el state del PR en S3
         # Sin `if:` → solo corre si el destroy (y todo lo anterior) salió bien.

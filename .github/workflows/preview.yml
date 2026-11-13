@@ -14,8 +14,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  ENV_NAME: pr-${{ github.event.pull_request.number }}  # formato que valida infra/preview/variables.tf
-  PR_NUMBER: ${{ github.event.pull_request.number }}    # solo el número: etiqueta pr=<n> (variables.tf valida ^[0-9]+$)
+  ENV_NAME: pr-${{ github.event.pull_request.number }}  # formato que valida infra/preview/variables.tf; la etiqueta pr=<n> sale de ENV_NAME (trimprefix en providers.tf)
   HEAD_SHA: ${{ github.event.pull_request.head.sha }}   # commit real del PR (no el merge commit)
   TF_IN_AUTOMATION: "true"                             # salida de Terraform sin sugerencias interactivas
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}            # repo compartido de ECR (previewpanda)
@@ -108,7 +107,6 @@ jobs:
           # -lock-timeout: si otro proceso (ej. plan de calidad) tiene el lock, espera en vez de fallar
           terraform apply -auto-approve -input=false -lock-timeout=5m \
             -var "env_name=${ENV_NAME}" \
-            -var "pr_number=${PR_NUMBER}" \
             -var "commit_sha=${HEAD_SHA}" \
             -var "image_uri=${IMAGE_URI}"
           # URL pública de la Lambda, para el comentario del PR
