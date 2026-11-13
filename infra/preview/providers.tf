@@ -7,7 +7,7 @@ provider "aws" {
       team    = "previewpanda"
       env     = "preview"
       owner   = "nicolas"
-      pr      = var.env_name
+      pr      = var.pr_number
     }
   }
 }

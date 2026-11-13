@@ -14,11 +14,12 @@ resource "aws_ecr_lifecycle_policy" "app_cleanup" {
     rules = [
       {
         rulePriority = 1
-        description  = "Si hay mas de 10 imagenes, borrar las mas viejas y dejar solo las 10 mas recientes"
+        description  = "Borrar imagenes sin tag (restos de builds fallidos o reemplazados)"
         selection = {
-          tagStatus   = "any"
-          countType   = "imageCountMoreThan"
-          countNumber = 10
+          tagStatus   = "untagged"
+          countType   = "sinceImagePushed"
+          countUnit   = "days"
+          countNumber = 1
         }
         action = {
           type = "expire"
