@@ -30,3 +30,4 @@ deliberadamente no se implementan por decisión de arquitectura y alcance.
 ## Aplicación
 
 Las instrucciones de ejecución y las rutas están en [app/README.md](app/README.md). 
+
