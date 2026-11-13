@@ -41,8 +41,8 @@ resource "aws_lambda_function" "app" {
 
   environment {
     variables = {
-      PR_NUMBER  = var.pr_number
-      COMMIT_SHA = coalesce(var.commit_sha, "NOT_CONFIGURED")
+      PR_NUMBER  = trimprefix(var.env_name, "pr-")
+      COMMIT_SHA = var.commit_sha
     }
   }
 

@@ -7,7 +7,7 @@ provider "aws" {
       team    = "previewpanda"
       env     = "preview"
       owner   = "nicolas"
-      pr      = var.pr_number
+      pr      = trimprefix(var.env_name, "pr-")
     }
   }
 }
