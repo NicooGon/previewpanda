@@ -45,7 +45,7 @@ El backend S3 usa `use_lockfile = true`, y `plan`, `apply` y `destroy` se ejecut
 |---|---|---|
 | `ci.yml` | Ninguno | Hace `init -backend=false`: no lee ni escribe states. |
 | `nightly-cleanup.yml` | `nightly-cleanup` | Un solo job recorre todos los states, así que no puede usar el grupo de cada PR. Solo destruye PRs cerrados hace más de 3 días; si coincide con una reapertura, el lock del state hace esperar a uno de los dos. |
-| `destroy.yml` | `production` | Un solo job recorre todos los states de `previews/` (PRs abiertos y cerrados), así que no puede usar el grupo de cada PR. El grupo evita dos destroy manuales a la vez; si coincide con un preview, el lock del state hace esperar a uno de los dos. |
+| `destroy.yml` | `destroy-manual` | Un solo job recorre todos los states de `previews/` (PRs abiertos y cerrados), así que no puede usar el grupo de cada PR. El grupo evita dos destroy manuales a la vez; si coincide con un preview, el lock del state hace esperar a uno de los dos. |
 
 ## Registro de entornos
 
