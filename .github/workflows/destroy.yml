@@ -1,0 +1,98 @@
+name: Destroy
+
+# Destrucción manual de todos los entornos de preview.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Escribí "destroy" para confirmar'
+        required: true
+        type: string
+      solo_listar:
+        description: 'Solo listar los entornos, sin destruir'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write   # OIDC hacia AWS
+
+# Ver docs/Concurrencia.md
+concurrency:
+  group: destroy-manual
+  cancel-in-progress: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY }}
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    steps:
+      # Solo desde main y con confirmación explícita
+      - name: Validar ejecución
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Este workflow solo se ejecuta desde main."
+            exit 1
+          fi
+          if [ "$CONFIRM" != "destroy" ]; then
+            echo "::error::Confirmación incorrecta. Escribí exactamente: destroy"
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Autenticar en AWS por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.x
+          terraform_wrapper: false
+
+      # previews/pr-<n>/terraform.tfstate -> pr-<n>
+      - name: Listar entornos de preview
+        id: listar
+        run: |
+          keys=$(aws s3api list-objects-v2 --bucket "$TF_STATE_BUCKET" --prefix previews/ \
+                   --query "Contents[?ends_with(Key, '/terraform.tfstate')].Key" --output text)
+
+          envs=""
+          for k in $keys; do
+            [ "$k" = "None" ] && continue
+            n="${k#previews/}"
+            envs="$envs ${n%%/*}"
+          done
+          envs="${envs# }"
+
+          echo "Entornos encontrados: ${envs:-ninguno}"
+          echo "envs=$envs" >> "$GITHUB_OUTPUT"
+
+      # Sigue con los demás si uno falla; al final lista los fallidos
+      - name: Destruir entornos de preview
+        if: ${{ !inputs.solo_listar && steps.listar.outputs.envs != '' }}
+        env:
+          ENVS: ${{ steps.listar.outputs.envs }}
+        run: |
+          fallidos=""
+          for env_name in $ENVS; do
+            echo "::group::$env_name"
+            bash scripts/destruir_entorno.sh "$env_name" || fallidos="$fallidos $env_name"
+            echo "::endgroup::"
+          done
+
+          if [ -n "$fallidos" ]; then
+            echo "::error::Fallaron:$fallidos"
+            exit 1
+          fi
