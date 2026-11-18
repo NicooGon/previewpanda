@@ -1,6 +1,6 @@
-@startuml PreviewPanda - Diagrama de despliegue
+@startuml diagrama1
 
-title PreviewPanda — Entornos efimeros por Pull Request (arquitectura real)
+title PreviewPanda — Entornos efímeros por Pull Request
 
 skinparam nodesep 50
 skinparam ranksep 60
@@ -12,6 +12,7 @@ actor "Revisor del PR" as user
 
 node "GitHub" {
   component "Pull Request" as pr
+  artifact "CSV en registro/environments" as registro
 }
 
 node "GitHub Actions (runner)" as gha {
@@ -19,11 +20,11 @@ node "GitHub Actions (runner)" as gha {
   artifact "destroy-preview.yml" as wf_destroy
 }
 
-cloud "AWS" as aws {
+cloud "AWS (us-east-1)" as aws {
 
   node "IAM" {
-    component "previewpanda-ci\n(politica minima)" as role_ci
-    component "pp-pr-<n>-lambda-exec\n(rol de ejecucion)" as role_lambda
+    component "previewpanda-ci\n(rol de CI por OIDC)" as role_ci
+    component "pp-pr-<n>-lambda-exec\n(rol de ejecución)" as role_lambda
   }
 
   node "ECR" {
@@ -35,47 +36,40 @@ cloud "AWS" as aws {
   }
 
   node "AWS Lambda" {
-    component "pp-pr-<n>\n(imagen de contenedor)" as lambda
-    component "Function URL" as url
+    component "pp-pr-<n>\n(API Express en contenedor)" as lambda
+    component "Function URL pública" as url
   }
 
   node "CloudWatch" {
-    database "/aws/lambda/pp-pr-<n>\n(7 dias)" as logs
+    database "/aws/lambda/pp-pr-<n>\n(7 días)" as logs
+    component "PreviewTestErrors\n(filtro del PR #24)" as metric
+    component "Dashboard y alarma\n(demo del PR #24)" as alarm
   }
 }
 
-dev --> pr : 1. abre PR
-pr --> wf_preview : 2. dispara
-wf_preview --> role_ci : 3. assume role (OIDC)
-wf_preview --> image : 4. build & push imagen
-wf_preview --> s3state : 5. terraform apply\n(lee/guarda state)
-image --> lambda : 6. imagen base
-lambda --> role_lambda : 7. usa (ejecuta con ese rol)
-lambda --> logs : 8. escribe logs
-lambda --> url : 9. expone
-url --> user : 10. HTTP GET
-wf_preview ..> pr : 11. comenta URL + tag
+dev --> pr : abre o actualiza
+pr --> wf_preview : dispara preview
+pr --> wf_destroy : dispara destroy al cerrar
+gha --> role_ci : asume el rol vía OIDC
+wf_preview --> image : publica la imagen
+wf_preview --> lambda : terraform apply
+wf_preview ..> pr : comenta URL y tag
+gha --> registro : registra eventos
+gha --> s3state : lee o actualiza el state
+wf_destroy --> lambda : terraform destroy
+wf_destroy --> image : borra imágenes del PR
 
-pr --> wf_destroy : 12. se cierra el PR
-wf_destroy --> s3state : 13. terraform destroy
-wf_destroy --> image : 14. borra imagen del PR
+image --> lambda : imagen del PR
+lambda --> role_lambda : usa el rol de ejecución
+user --> url : HTTP GET
+url --> lambda : invoca la API
+lambda --> logs : escribe logs
+logs --> metric : preview_test_error
+metric --> alarm : alimenta el panel y la alarma
 
 note right of s3state
   Un state distinto
   por cada PR
-end note
-
-note bottom of role_ci
-  Acotado a pp-* y al
-  repo previewpanda.
-  Sin AdministratorAccess.
-end note
-
-note bottom of image
-  La lifecycle policy solo
-  borra imagenes sin tag;
-  la limpieza por PR la hace
-  destroy-preview.yml
 end note
 
 @enduml

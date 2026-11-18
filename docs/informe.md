@@ -10,11 +10,11 @@
 
 ## 1. Resumen
 
-PreviewPanda crea un entorno de prueba aislado para cada Pull Request. Al abrir o actualizar un PR, GitHub Actions construye la aplicación, publica una imagen en Amazon ECR y ejecuta Terraform para crear una función AWS Lambda con una Function URL pública. La URL se publica como comentario en el PR.
+PreviewPanda crea un entorno de prueba aislado para cada Pull Request. Al abrir, actualizar o reabrir un PR, GitHub Actions prepara la imagen en Amazon ECR y ejecuta Terraform para desplegar la API en AWS Lambda. El comentario del PR incluye la Function URL y el plan de Terraform.
 
-Cuando el PR se cierra o se mergea, otro workflow ejecuta `terraform destroy` sobre el state correspondiente y elimina los recursos temporales. El script de limpieza de huérfanos identifica los previews cerrados que superan el tiempo definido por el equipo.
+Cuando el PR se cierra o se mergea, otro workflow ejecuta `terraform destroy` sobre su state y elimina los recursos temporales. Una limpieza nocturna revisa los entornos huérfanos que quedan en S3.
 
-El objetivo principal no es desarrollar una aplicación compleja, sino demostrar el ciclo de vida completo de infraestructura temporal: creación, aislamiento, observación, registro de costos y destrucción.
+Así, quien revisa el PR puede probar ese commit desde el navegador antes de mergearlo. Una vez cerrado el PR, el entorno deja de estar disponible y queda un registro de su duración y costo estimado.
 
 ## 2. Requisitos verificables
 
@@ -25,15 +25,15 @@ El objetivo principal no es desarrollar una aplicación compleja, sino demostrar
 | 3 | Módulo Terraform reutilizable | Variable `env_name` para generar los nombres del entorno. |
 | 4 | Un state por entorno | Key de S3 con el formato `previews/pr-<n>/terraform.tfstate`. |
 | 5 | Etiqueta `pr=<n>` | Tags comunes aplicados a los recursos creados. |
-| 6 | Limpieza de huérfanos | `scripts/cleanup_orphans.py` consulta los estados de los PR y ejecuta la destrucción de los entornos cerrados que superan el límite definido. |
+| 6 | Limpieza nocturna de huérfanos | `nightly-cleanup.yml` ejecuta `scripts/cleanup_orphans.py` todos los días a las 03:00 de Uruguay. |
 | 7 | Política de concurrencia | Grupo `preview-pr-<n>` para serializar las ejecuciones del mismo PR. |
-| 8 | Registro y costo por entorno | `docs/environments.csv` define los campos de evento, imagen, URL, duración y costo estimado. |
+| 8 | Registro y costo por entorno | Los workflows escriben en el CSV de la rama `registro/environments`. El PR #26 muestra los tres eventos del ciclo. |
 
 ## 3. Alcance de la aplicación
 
 La aplicación es una API Node.js con Express. Se ejecuta localmente como servidor HTTP y en AWS Lambda mediante una imagen de contenedor.
 
-La misma imagen puede ser utilizada por cada preview. Los valores del Pull Request y del commit se reciben mediante variables de entorno:
+Cada preview usa una imagen identificada por el número de PR y el commit. Terraform configura estas variables en Lambda:
 
 - `PR_NUMBER`: número del Pull Request.
 - `COMMIT_SHA`: commit de la imagen desplegada.
@@ -47,13 +47,11 @@ La misma imagen puede ser utilizada por cada preview. Los valores del Pull Reque
 | `GET /error` | Devuelve un `500` controlado para probar logs y alarmas. |
 | `GET /api-docs` | Expone la documentación interactiva Swagger. |
 
-La aplicación no incorpora base de datos, autenticación ni lógica de negocio adicional, porque el foco del proyecto es la infraestructura efímera y su automatización.
-
-## 3.1 Pruebas de la aplicación
+### 3.1 Pruebas de la aplicación
 
 Las mismas rutas se prueban primero localmente y luego sobre la Function URL creada para el PR.
 
-### `GET /`
+#### `GET /`
 
 Verifica la identidad del entorno desplegado.
 
@@ -61,7 +59,7 @@ Verifica la identidad del entorno desplegado.
 GET /
 ```
 
-Respuesta observada en la prueba:
+Ejemplo de respuesta:
 
 ```json
 {
@@ -74,7 +72,7 @@ Respuesta observada en la prueba:
 
 La respuesta refleja el Pull Request probado y el commit usado para construir la imagen. En local, si no se configuran variables, se muestran los valores `NOT_CONFIGURED`.
 
-### `GET /health`
+#### `GET /health`
 
 Verifica que la Lambda y la aplicación respondan correctamente.
 
@@ -89,9 +87,9 @@ HTTP 200
 ok
 ```
 
-Esta ruta se utiliza como smoke test y como health check de la función.
+Esta ruta sirve para comprobar manualmente que el entorno responde después del despliegue.
 
-### `GET /error`
+#### `GET /error`
 
 Genera un error controlado para probar observabilidad.
 
@@ -101,7 +99,7 @@ GET /error
 
 Resultado esperado:
 
-```json
+```text
 HTTP 500
 {
   "message": "Error de prueba"
@@ -113,7 +111,7 @@ El error es intencional. En AWS aparece en los logs de CloudWatch con la marca
 esa marca, porque un `HTTP 500` controlado no necesariamente incrementa la
 métrica nativa `AWS/Lambda Errors`.
 
-### `GET /api-docs`
+#### `GET /api-docs`
 
 Abre la interfaz Swagger de la API.
 
@@ -123,9 +121,13 @@ GET /api-docs
 
 Desde Swagger se pueden ejecutar `/`, `/health` y `/error` sobre el entorno local o sobre la Function URL del PR.
 
+### 3.2 Terraform Quality
+
+Cuando se abre, actualiza o reabre un PR, el workflow `Terraform Quality` revisa el formato, valida la configuración y ejecuta TFLint en `infra/preview`. Inicializa Terraform con `-backend=false`, por lo que estos controles se ejecutan sin credenciales de AWS ni acceso al state de S3. Checkov escanea `infra/` y sus hallazgos quedan en el log del job mediante `soft_fail: true`. El workflow Preview ejecuta el plan contra AWS y lo publica como parte del comentario del PR.
+
 ## 4. Arquitectura AWS
 
-La arquitectura definida utiliza:
+Elegimos Lambda porque la API recibe poco tráfico y se invoca bajo demanda. La Function URL le da al revisor acceso directo al preview sin agregar otro servicio para exponer la API.
 
 - **AWS Lambda con imagen de contenedor:** una función por Pull Request.
 - **Lambda Function URL:** URL pública propia para cada preview.
@@ -147,33 +149,40 @@ La arquitectura definida utiliza:
 | Lock del state | `use_lockfile = true` |
 | Rol de CI | `previewpanda-ci` |
 
-El repositorio ECR, el bucket S3, el proveedor OIDC, el rol de CI, el presupuesto, el dashboard y la alarma son recursos compartidos. La Lambda, su Function URL, el rol de ejecución, el log group, el state y la imagen etiquetada se consideran recursos asociados a un PR.
+Los previews comparten el repositorio ECR, el bucket S3, el proveedor OIDC y el rol de CI. Cada PR tiene su Lambda, su Function URL pública, su rol de ejecución, su grupo de logs, su state y sus imágenes. El dashboard y la alarma del PR #24 se configuraron en la consola para la prueba de observabilidad.
 
 ## 5. Flujo de creación y destrucción
 
-### Creación o actualización de un PR
+### Apertura, actualización o reapertura de un PR
 
-1. Un desarrollador abre o actualiza un Pull Request.
+1. Un desarrollador abre, actualiza o reabre un Pull Request.
 2. GitHub Actions obtiene credenciales temporales mediante OIDC.
-3. Se construye la imagen Docker de `app/`.
-4. La imagen se publica en ECR con un tag como `pr-12-<sha>`.
+3. El workflow busca en ECR el tag `pr-<n>-<sha7>`.
+4. Si el tag no existe, construye y publica la imagen de `app/`.
 5. Terraform inicializa el backend con el state del PR.
-6. Terraform crea o actualiza la Lambda `pp-pr-<n>`.
-7. Se crea la Function URL.
-8. El workflow publica o actualiza un comentario con la URL.
-9. El workflow registra el evento en `docs/environments.csv` mediante la rama `registro/environments`.
+6. Terraform genera el plan y lo guarda en `tfplan`.
+7. El workflow aplica ese mismo plan y obtiene la Function URL de la Lambda `pp-pr-<n>`.
+8. El workflow registra `created` o `updated` en el CSV de la rama `registro/environments`.
+9. El workflow publica o actualiza el comentario del PR con la URL, el commit, el tag de la imagen y el detalle del plan. Si falla el despliegue, el comentario indica el fallo y enlaza a la ejecución.
 
-El orden build → push → apply es obligatorio, porque Lambda necesita que la imagen exista en ECR antes de crear o actualizar la función.
+La imagen tiene que estar en ECR antes de aplicar el plan. Si el tag ya existe, el workflow reutiliza esa imagen.
 
 ### Cierre o merge del PR
 
 1. GitHub Actions detecta el cierre o merge.
-2. Se recupera el mismo state `previews/pr-<n>/terraform.tfstate`.
+2. El workflow llama a `scripts/destruir_entorno.sh`, que inicializa Terraform con el mismo state `previews/pr-<n>/terraform.tfstate`.
 3. Se ejecuta `terraform destroy`.
 4. Se elimina la Lambda y los recursos asociados.
-5. Se elimina explícitamente el objeto de state de S3.
-6. Se limpia la imagen del PR en ECR.
-7. El workflow registra la destrucción, la duración del entorno y el costo estimado en la rama `registro/environments`.
+5. El workflow elimina el objeto activo del state en S3.
+6. El workflow elimina las imágenes etiquetadas para el PR en ECR.
+7. El workflow registra la destrucción y la duración del entorno en la rama `registro/environments`. Con una tarifa configurada, también registra el costo estimado.
+8. El workflow actualiza el comentario del PR con el resultado de la limpieza.
+
+### Limpieza nocturna y destrucción manual
+
+El workflow `nightly-cleanup.yml` revisa los states de S3 todos los días a las 06:00 UTC (03:00 de Uruguay). El script conserva los entornos con un PR abierto o cuyo estado no puede confirmar. Para los PR cerrados, mergeados o identificados como inexistentes, compara los días enteros desde la última modificación del state con `DIAS_LIMITE`, que vale 3 por defecto. Si supera ese límite, intenta destruir el entorno.
+
+El workflow manual `destroy.yml` se ejecuta desde `main`. Por defecto lista todos los entornos de preview. Con el modo de listado desactivado y la confirmación `destroy`, llama al mismo script de destrucción que usa el workflow de cierre de PR.
 
 ## 6. Concurrencia y aislamiento
 
@@ -185,33 +194,15 @@ preview-pr-<n>
 
 Esto evita que dos ejecuciones del mismo PR modifiquen simultáneamente el mismo state. Los PR diferentes pueden ejecutarse de forma independiente.
 
-La política se prueba con dos pushes sucesivos sobre un mismo PR y con dos PR abiertos al mismo tiempo.
+Preview y Destroy preview comparten ese grupo. El diagrama de concurrencia muestra el caso de dos pushes seguidos al mismo PR y cómo el segundo espera mientras corre el primero. La limpieza nocturna y el destroy manual usan grupos propios porque recorren varios entornos. El bloqueo de S3 también protege el state cuando dos operaciones de Terraform coinciden. Los casos de concurrencia están en [Concurrencia.md](Concurrencia.md).
 
 ## 7. Observabilidad
 
-La aplicación dispone de `/error` para provocar una respuesta HTTP 500 controlada. La prueba de observabilidad consiste en:
+Configuramos el dashboard y la alarma desde la consola de AWS para el PR #24, con la imagen `pr-24-626cda2`. Para probar la alarma llamamos a `GET /error` desde la Function URL. La API responde con HTTP 500 y escribe `preview_test_error` en CloudWatch Logs. Un filtro cuenta esas entradas en la métrica personalizada `PreviewTestErrors`.
 
-1. Invocar `GET /error` en la Function URL.
-2. Verificar el registro del error en CloudWatch Logs.
-3. Comprobar que la métrica configurada para el error de prueba aumenta.
-4. Verificar la alarma de CloudWatch.
-
-El dashboard y la alarma se crearon en CloudWatch para el PR de demostración.
-La alarma usa la métrica personalizada `PreviewTestErrors`, que se incrementa
-al invocar `/error`. La retención del log group es de 7 días.
-
-En la ejecución de demostración del PR #24 se utilizó la imagen
-`pr-24-626cda2`.
-
-Esta configuración manual está verificada en AWS y sirve para la demostración.
-Por indicación del docente, el dashboard y la alarma se configuraron
-directamente desde la consola de AWS. La demostración muestra el dashboard,
-la alarma en estado de alarma después de invocar `/error` y la retención de
-logs de 7 días.
+En la captura se ven cinco errores de prueba, la alarma `previewpanda-pr-24-error` activada y el panel con las métricas de Lambda `Duration`, `Errors`, `Invocations` y `Throttles`. Terraform configura la retención de los grupos de logs en siete días.
 
 ![Dashboard y alarma de CloudWatch](images/dashboard-alarma-aws.png)
-
-Los log groups temporales conservan los logs durante 7 días.
 
 ## 8. Seguridad e IAM
 
@@ -219,13 +210,7 @@ GitHub Actions se autentica en AWS mediante OIDC. El repositorio no guarda acces
 
 El rol `previewpanda-ci` utiliza la política mínima documentada en [docs/previewpanda-ci-policy.json](previewpanda-ci-policy.json).
 
-La matriz IAM documenta:
-
-- Identidad.
-- Permiso.
-- Recurso.
-- Motivo del permiso.
-- Evidencia de que no se concedieron permisos innecesarios.
+La [matriz IAM](iam.md) detalla qué identidades usa el proyecto, qué recursos puede tocar cada una y para qué necesita esos permisos.
 
 ## 9. FinOps
 
@@ -235,10 +220,9 @@ Las medidas principales de ahorro son:
 
 - Lambda bajo demanda.
 - Una sola región: `us-east-1`.
-- Imágenes pequeñas en ECR.
 - Limpieza de imágenes asociadas a PRs cerrados.
 - Destrucción automática del entorno.
-- Limpieza de huérfanos mediante `scripts/cleanup_orphans.py`.
+- Limpieza programada de entornos huérfanos.
 - Retención de logs limitada a 7 días.
 
 Cost Explorer mostró un costo observado de USD 0,00 para la ventana
@@ -247,30 +231,18 @@ cuenta y no permite atribuir un importe exacto al PR #24. Además, está activo
 el presupuesto mensual `previewpanda-presupuesto` por USD 10,00, con tres
 destinatarios verificados y tres alertas asociadas por destinatario. La pestaña
 de alertas confirma los umbrales 50 % (USD 5,00), 80 % (USD 8,00) y
-100 % (USD 10,00), todos sin superar. La proyección productiva se mantiene
-como estimación del alcance.
+100 % (USD 10,00), todos sin superar en la captura del presupuesto. El rango de USD 0–2 corresponde al alcance de la demo.
 
 ## 10. Registro de entornos
 
-El archivo [environments.csv](environments.csv) contiene la plantilla con estos campos:
-
-```text
-pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_cost_usd,notes
-```
-
-El registro automático se implementa mediante
-`scripts/registrar_entorno.sh`, que escribe
-en la rama `registro/environments` para no modificar directamente `main`.
+Los workflows de Preview y Destroy preview llaman a `scripts/registrar_entorno.sh` para agregar filas a [environments.csv](environments.csv). El historial se guarda en la rama `registro/environments`.
 
 - El workflow de preview registra `created` al abrir o reabrir un PR y `updated`
   en cada push posterior. La fila incluye el tag de ECR, la Function URL, el
   commit y el enlace a la ejecución de GitHub Actions.
 - El workflow de destroy registra `destroyed` después de completar la
-  destrucción, borrar el state y eliminar las imágenes del PR. La duración se
-  calcula desde la fila `created` y el costo estimado usa
-  `PREVIEW_COST_USD_PER_HOUR`.
-- El script reintenta el push si la rama recibió otra actualización y no hace
-  fallar el deploy o el destroy cuando el registro no puede escribirse.
+  destrucción, borrar el state y eliminar las imágenes del PR. El script usa el último `created` para calcular la duración. Si falta esa fila, toma la fecha de apertura del PR. Con `PREVIEW_COST_USD_PER_HOUR` configurada multiplica las horas por la tarifa. Si falta la tarifa, deja el costo vacío.
+- Si otro proceso actualiza la rama al mismo tiempo, el script reintenta el push. Los workflows permiten que el paso de registro falle sin cambiar el resultado del despliegue o la destrucción.
 
 Las URL, las fechas y los tags se toman de ejecuciones reales; la columna
 `estimated_cost_usd` representa una estimación basada en la duración del entorno.
@@ -287,23 +259,15 @@ pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_c
 26,pr-26,destroyed,2026-11-18T03:35:42Z,pr-26-b176149,,0.07,0.000007,mergeado run=https://github.com/NicooGon/previewpanda/actions/runs/44231473760
 ```
 
-La primera fila registra la creación del entorno, la segunda un nuevo push
-que actualiza la imagen y la tercera el cierre del PR. En la fila `destroyed`,
-`lifetime_hours` indica la duración aproximada del entorno y
-`estimated_cost_usd` el costo estimado para ese período. Los enlaces de
-`notes` permiten relacionar cada fila con la ejecución correspondiente de
-GitHub Actions.
+El entorno mantuvo la misma URL al pasar de la imagen `pr-26-2f13196` a `pr-26-b176149`. Tras el merge, el registro muestra una vida de 4 minutos y 4 segundos (`0.07` horas redondeadas) y un costo estimado de USD `0.000007`. Cada fila conserva el enlace a su ejecución de GitHub Actions en `notes`.
 
 ## 11. Diagramas
 
-La consigna requiere un diagrama de arquitectura y el artifact propone además
-un diagrama de secuencia. Para explicar los controles principales del proyecto
-se incluyen cinco diagramas PlantUML, en el orden usado en la presentación.
+Los cinco diagramas en PlantUML muestran desde la arquitectura en AWS hasta los pasos que ejecuta GitHub Actions.
 
 ### 11.1 Diagrama de despliegue AWS
 
-Muestra los límites entre GitHub, GitHub Actions y AWS, además de ECR, S3,
-IAM, Lambda, Function URL, CloudWatch y AWS Budgets.
+Muestra qué queda en GitHub y qué se ejecuta en AWS, cómo el revisor llega a la API y cómo los logs del PR #24 alimentan la métrica y la alarma.
 
 Archivo fuente: [diagrama-despliegue.puml](diagrams/diagrama-despliegue.puml).
 
@@ -311,10 +275,7 @@ Archivo fuente: [diagrama-despliegue.puml](diagrams/diagrama-despliegue.puml).
 
 ### 11.2 Diagrama de actividad de limpieza de huérfanos
 
-Este es un diagrama de actividad: representa el algoritmo del job nocturno
-mediante acciones, decisiones y estados finales. Consulta si el PR sigue
-abierto, calcula la antigüedad del state y destruye solo los entornos cerrados
-que superan el límite definido.
+Muestra las decisiones que toma el script cuando lo invoca el workflow nocturno. El criterio combina el estado del PR y los días enteros desde la última modificación del state.
 
 Archivo fuente: [diagrama-estados-huerfanos.puml](diagrams/diagrama-estados-huerfanos.puml).
 
@@ -332,9 +293,7 @@ Archivo fuente: [diagrama-secuencia-concurrencia.puml](diagrams/diagrama-secuenc
 
 ### 11.4 Diagrama de secuencia del workflow Terraform Quality
 
-Muestra el flujo de `fmt`, `validate`, TFLint y Checkov. También deja claro que
-este workflow no usa OIDC, no accede al state remoto y no crea ni destruye
-recursos AWS.
+Muestra cómo GitHub Actions prepara el runner, revisa Terraform y publica el resultado del job `quality`.
 
 Archivo fuente: [diagrama-secuencia-quality.puml](diagrams/diagrama-secuencia-quality.puml).
 
@@ -342,33 +301,12 @@ Archivo fuente: [diagrama-secuencia-quality.puml](diagrams/diagrama-secuencia-qu
 
 ### 11.5 Diagrama de secuencia del ciclo del PR
 
-Muestra la apertura, actualización, prueba y cierre del Pull Request, junto
-con la interacción entre GitHub, Actions, OIDC, ECR, Terraform, S3, Lambda,
-Function URL y CloudWatch.
+Sigue el ciclo del PR desde el despliegue hasta el destroy. El orden actual entre el plan, el apply, el registro en el CSV y el comentario del PR figura en la sección 5.
 
 Archivo fuente: [diagrama-secuencia.puml](diagrams/diagrama-secuencia.puml).
 
 ![Diagrama 5 - Ciclo del PR](diagrams/diagrama5.svg)
 
-## 12. Componentes del proyecto
+## 12. Resultado de las pruebas
 
-- API Express con las rutas `/`, `/health`, `/error` y `/api-docs`.
-- Handler compatible con AWS Lambda y Dockerfile basado en la imagen oficial
-  AWS Lambda Node.js 22.
-- Workflow `Terraform Quality` con `fmt`, `validate`, TFLint y Checkov.
-- Workflows de preview y destroy con imagen en ECR, Terraform, Function URL y
-  limpieza de recursos temporales.
-- Script `scripts/registrar_entorno.sh` para registrar automáticamente los
-  eventos del entorno en la rama `registro/environments`.
-- Script `scripts/cleanup_orphans.py` para identificar previews cerrados que
-  superan el límite de antigüedad.
-- Registro `docs/environments.csv`, informe FinOps, matriz IAM y diagramas
-  PlantUML utilizados para describir la solución.
-
-## 13. Conclusión
-
-PreviewPanda implementa un patrón de entornos efímeros orientado a Pull Requests. La aplicación es pequeña a propósito: permite concentrar la evaluación en Terraform, aislamiento de states, CI/CD, autenticación federada, observabilidad y control de costos.
-
-La aplicación, la imagen, la infraestructura principal, los workflows de
-preview, el control de calidad, la observabilidad y la documentación forman
-una solución coherente para crear, usar y destruir entornos efímeros por PR.
+En el PR #24 probamos la API desplegada y activamos la alarma de CloudWatch con `/error`. En el PR #26 el CSV dejó registro del despliegue, el cambio de imagen después de un push y el destroy tras el merge. El procedimiento para repetir el ciclo está en el [README](../README.md).

@@ -1,4 +1,4 @@
-@startuml PreviewPanda - Politica de concurrencia
+@startuml diagrama3
 
 title PreviewPanda — Dos pushes seguidos al mismo PR (concurrency group)
 
@@ -11,7 +11,7 @@ participant "S3 (state)" as S3
 
 Dev -> GH : push 1 al PR #<n>
 GH -> Queue : encola Run A\n(group preview-pr-<n>)
-Queue -> RunA : arranca\n(cola vacia)
+Queue -> RunA : arranca\n(cola vacía)
 RunA -> S3 : terraform apply\n(usa el lock del state)
 
 Dev -> GH : push 2, a los pocos segundos
@@ -27,15 +27,14 @@ Queue -> RunB : en espera...
 RunA -> S3 : termina el apply,\nlibera el state
 RunA --> GH : check "preview" (success)
 
-Queue -> RunB : recien ahora arranca
+Queue -> RunB : arranca al terminar Run A
 RunB -> S3 : terraform apply\n(con el commit 2)
+RunB -> S3 : termina el apply,\nlibera el state
 RunB --> GH : check "preview" (success)
 
-note over S3
-  El state nunca lo tocan
-  dos applies a la vez:
-  la cola los serializa,
-  no corren en paralelo.
+note over Queue, S3
+  Preview y Destroy comparten el grupo por PR.
+  El backend de S3 también bloquea el state.
 end note
 
 @enduml

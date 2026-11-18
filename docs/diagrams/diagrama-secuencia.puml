@@ -1,4 +1,4 @@
-@startuml PreviewPanda - Diagrama de secuencia
+@startuml diagrama5
 
 title PreviewPanda — Secuencia de Preview y Destroy
 
@@ -12,50 +12,60 @@ participant "Terraform" as TF
 participant "Lambda" as Lambda
 participant "S3\n(state)" as S3
 participant "CloudWatch" as CW
+participant "Rama registro/environments" as CSV
 
 == Abrir o actualizar el PR ==
 
-Dev -> PR : abre / push
+Dev -> PR : abre, actualiza o reabre
 PR -> GA : dispara preview.yml
-GA -> IAM : assume role\n(previewpanda-ci-minimal)
+GA -> IAM : asume el rol previewpanda-ci por OIDC
 IAM --> GA : credenciales temporales
-GA -> ECR : build & push imagen\n(si el tag no existe)
-GA -> TF : init\n(key = previews/pr-<n>)
-TF -> S3 : lee / crea state
-GA -> TF : apply -var env_name=pr-<n>
-TF -> IAM : crea rol pp-<n>-lambda-exec
-TF -> Lambda : crea funcion\n(image_uri de ECR)
-TF -> Lambda : crea Function URL
-TF -> CW : crea log group\n(retencion 7 dias)
+GA -> ECR : consulta el tag pr-<n>-<sha7>
+opt El tag todavía no existe
+  GA -> GA : construye la imagen de app/
+  GA -> ECR : publica la imagen
+end
+GA -> TF : init con el state del PR
+TF -> S3 : lee previews/pr-<n>/terraform.tfstate
+GA -> TF : apply con env_name, commit_sha e image_uri
+TF -> IAM : gestiona rol pp-pr-<n>-lambda-exec
+TF -> CW : gestiona log group (7 días)
+TF -> Lambda : crea o actualiza función y Function URL
 TF --> S3 : guarda state
 TF --> GA : output function_url
-GA -> PR : comenta URL + tag de imagen
+GA -> PR : publica o actualiza el comentario con la URL
+GA -> CSV : registra created o updated
 
 == El revisor prueba el entorno ==
 
-Reviewer -> Lambda : HTTP GET (Function URL)
-Lambda -> CW : escribe logs
-Lambda --> Reviewer : respuesta (200 OK)
+Reviewer -> Lambda : GET /health mediante Function URL
+Lambda --> Reviewer : HTTP 200
+opt Prueba de observabilidad del PR #24
+  Reviewer -> Lambda : GET /error
+  Lambda -> CW : registra preview_test_error
+  Lambda --> Reviewer : HTTP 500
+  CW -> CW : actualiza PreviewTestErrors y evalúa la alarma
+end
 
 == Cerrar o mergear el PR ==
 
 PR -> GA : evento "closed"\ndispara destroy-preview.yml
-GA -> IAM : assume role
+GA -> IAM : asume el rol por OIDC
 GA -> TF : init\n(misma key del PR)
 GA -> TF : destroy -var env_name=pr-<n>
-TF -> Lambda : borra funcion + Function URL
-TF -> IAM : borra rol pp-<n>-lambda-exec
-TF -> CW : borra log group
-TF --> S3 : state queda vacio
-GA -> S3 : borra el archivo .tfstate
-GA -> ECR : borra la/s imagen/es\ndel PR (prefijo pr-<n>-)
-GA -> PR : actualiza comentario\n("entorno destruido")
-
-note over GA, S3
-  Si el destroy falla, no se borran
-  ni el state ni la imagen: quedan
-  disponibles para reintentar o para
-  que el job nocturno los detecte.
-end note
+alt Terraform completa el destroy
+  TF -> Lambda : elimina función y Function URL
+  TF -> IAM : elimina rol pp-pr-<n>-lambda-exec
+  TF -> CW : elimina log group
+  TF --> S3 : guarda el state sin recursos
+  GA -> S3 : borra el objeto activo del state
+  GA -> ECR : elimina los tags del PR
+  opt La limpieza de S3 y ECR termina bien
+    GA -> CSV : registra destroyed con duración y costo estimado
+  end
+else Terraform devuelve un error
+  GA -> GA : omite la limpieza de S3 y ECR
+end
+GA -> PR : actualiza el comentario con el resultado
 
 @enduml

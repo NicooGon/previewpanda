@@ -1,31 +1,23 @@
-@startuml PreviewPanda - Flujo del script de huerfanos
+@startuml diagrama2
 
-title PreviewPanda — cleanup_orphans.py: decision por entorno
+title PreviewPanda — Limpieza de huérfanos por entorno
 
 start
-:obtener_lista_de_entornos()\n(lista los state en S3);
-:consultar_estado_del_pr()\n(gh pr view);
-
-if (Estado del PR?) then (OPEN)
-  :No tocar\n(el PR sigue activo);
-  stop
-elseif (DESCONOCIDO\n(error de gh)) then (si)
-  :No tocar\n(por seguridad, ante la duda);
-  stop
-else (CERRADO)
-  :dias_sin_cambios\n(hoy - LastModified);
-
-  if (dias_sin_cambios > DIAS_LIMITE?) then (si)
-    floating note left: DIAS_LIMITE = 3 (default,\nconfigurable por variable de entorno)
-    :destruir_entorno();
-    :terraform destroy;
-    :borrar_el_archivo_de_state();
-    :borrar_las_imagenes_del_pr();
-    stop
-  else (no, todavia reciente)
-    :No tocar\n(le damos margen);
-    stop
+:Listar los states de previews en S3\ny calcular días desde LastModified;
+while (¿Queda un entorno por revisar?) is (sí)
+  :Consultar el PR con gh pr view;
+  if (¿PR cerrado, mergeado o inexistente?) then (sí)
+    if (¿Días enteros > DIAS_LIMITE?) then (sí)
+      floating note left: DIAS_LIMITE vale 3 por defecto.
+      :Ejecutar terraform init y terraform destroy;
+      :Borrar el state de S3 y los tags del PR en ECR;
+    else (no)
+      :Conservar por antigüedad;
+    endif
+  else (abierto o estado desconocido)
+    :Conservar el entorno;
   endif
-endif
+endwhile (no)
+stop
 
 @enduml
