@@ -12,22 +12,22 @@
 
 PreviewPanda crea un entorno de prueba aislado para cada Pull Request. Al abrir o actualizar un PR, GitHub Actions construye la aplicación, publica una imagen en Amazon ECR y ejecuta Terraform para crear una función AWS Lambda con una Function URL pública. La URL se publica como comentario en el PR.
 
-Cuando el PR se cierra o se mergea, otro workflow ejecuta `terraform destroy` sobre el state correspondiente y elimina los recursos temporales. Un proceso nocturno detecta previews huérfanos y elimina aquellos que superen el tiempo definido por el equipo.
+Cuando el PR se cierra o se mergea, otro workflow ejecuta `terraform destroy` sobre el state correspondiente y elimina los recursos temporales. El script de limpieza de huérfanos identifica los previews cerrados que superan el tiempo definido por el equipo.
 
 El objetivo principal no es desarrollar una aplicación compleja, sino demostrar el ciclo de vida completo de infraestructura temporal: creación, aislamiento, observación, registro de costos y destrucción.
 
 ## 2. Requisitos verificables
 
-| # | Requisito | Evidencia esperada | Estado |
-|---:|---|---|---|
-| 1 | Cada PR tiene su propio entorno y URL | Lambda `pp-pr-<n>` con Function URL propia | Verificado en PR de demostración |
-| 2 | El entorno se destruye al cerrar o mergear | `terraform destroy` y limpieza de recursos | Verificado en PR de demostración |
-| 3 | Módulo Terraform reutilizable | Variable `env_name` | Implementado |
-| 4 | Un state por entorno | S3 key `previews/pr-<n>/terraform.tfstate` | Implementado |
-| 5 | Etiqueta `pr=<n>` | Tags en los recursos creados | Implementado |
-| 6 | Limpieza nocturna de huérfanos | Workflow que destruye previews con más de 3 días | Pendiente de workflow |
-| 7 | Política de concurrencia | Grupo `preview-pr-<n>` probado con pushes sucesivos | Implementado y probado |
-| 8 | Registro y costo por entorno | `docs/environments.csv` actualizado por workflows | Plantilla creada |
+| # | Requisito | Implementación en PreviewPanda |
+|---:|---|---|
+| 1 | Cada PR tiene su propio entorno y URL | Lambda `pp-pr-<n>` con Function URL propia. |
+| 2 | El entorno se destruye al cerrar o mergear | `terraform destroy` y limpieza de los recursos temporales asociados al PR. |
+| 3 | Módulo Terraform reutilizable | Variable `env_name` para generar los nombres del entorno. |
+| 4 | Un state por entorno | Key de S3 con el formato `previews/pr-<n>/terraform.tfstate`. |
+| 5 | Etiqueta `pr=<n>` | Tags comunes aplicados a los recursos creados. |
+| 6 | Limpieza de huérfanos | `scripts/cleanup_orphans.py` consulta los estados de los PR y ejecuta la destrucción de los entornos cerrados que superan el límite definido. |
+| 7 | Política de concurrencia | Grupo `preview-pr-<n>` para serializar las ejecuciones del mismo PR. |
+| 8 | Registro y costo por entorno | `docs/environments.csv` define los campos de evento, imagen, URL, duración y costo estimado. |
 
 ## 3. Alcance de la aplicación
 
@@ -61,7 +61,7 @@ Verifica la identidad del entorno desplegado.
 GET /
 ```
 
-Respuesta esperada:
+Respuesta observada en la prueba:
 
 ```json
 {
@@ -72,7 +72,7 @@ Respuesta esperada:
 }
 ```
 
-El valor de `pr` debe coincidir con el Pull Request probado y `commit` debe identificar el commit usado para construir la imagen. En local, si no se configuran variables, se muestran los valores `NOT_CONFIGURED`.
+La respuesta refleja el Pull Request probado y el commit usado para construir la imagen. En local, si no se configuran variables, se muestran los valores `NOT_CONFIGURED`.
 
 ### `GET /health`
 
@@ -135,7 +135,7 @@ La arquitectura definida utiliza:
 - **GitHub Actions OIDC + IAM:** autenticación sin claves estáticas.
 - **Amazon CloudWatch:** logs, dashboard y alarma.
 
-### Valores confirmados
+### Valores
 
 | Dato | Valor |
 |---|---|
@@ -161,7 +161,7 @@ El repositorio ECR, el bucket S3, el proveedor OIDC, el rol de CI, el presupuest
 6. Terraform crea o actualiza la Lambda `pp-pr-<n>`.
 7. Se crea la Function URL.
 8. El workflow publica o actualiza un comentario con la URL.
-9. Se registra el evento en `docs/environments.csv`.
+9. El workflow registra el evento en `docs/environments.csv` mediante la rama `registro/environments`.
 
 El orden build → push → apply es obligatorio, porque Lambda necesita que la imagen exista en ECR antes de crear o actualizar la función.
 
@@ -173,7 +173,7 @@ El orden build → push → apply es obligatorio, porque Lambda necesita que la 
 4. Se elimina la Lambda y los recursos asociados.
 5. Se elimina explícitamente el objeto de state de S3.
 6. Se limpia la imagen del PR en ECR.
-7. Se registra la destrucción y el costo estimado.
+7. El workflow registra la destrucción, la duración del entorno y el costo estimado en la rama `registro/environments`.
 
 ## 6. Concurrencia y aislamiento
 
@@ -185,11 +185,11 @@ preview-pr-<n>
 
 Esto evita que dos ejecuciones del mismo PR modifiquen simultáneamente el mismo state. Los PR diferentes pueden ejecutarse de forma independiente.
 
-La política deberá probarse con dos pushes sucesivos sobre un mismo PR y con dos PR abiertos al mismo tiempo.
+La política se prueba con dos pushes sucesivos sobre un mismo PR y con dos PR abiertos al mismo tiempo.
 
 ## 7. Observabilidad
 
-La aplicación dispone de `/error` para provocar una respuesta HTTP 500 controlada. La prueba prevista es:
+La aplicación dispone de `/error` para provocar una respuesta HTTP 500 controlada. La prueba de observabilidad consiste en:
 
 1. Invocar `GET /error` en la Function URL.
 2. Verificar el registro del error en CloudWatch Logs.
@@ -205,19 +205,21 @@ En la ejecución de demostración del PR #24 se utilizó la imagen
 
 Esta configuración manual está verificada en AWS y sirve para la demostración.
 Por indicación del docente, el dashboard y la alarma se configuraron
-directamente desde la consola de AWS. La evidencia debe mostrar el dashboard,
+directamente desde la consola de AWS. La demostración muestra el dashboard,
 la alarma en estado de alarma después de invocar `/error` y la retención de
 logs de 7 días.
 
-Los log groups temporales deberán conservarse durante 7 días.
+![Dashboard y alarma de CloudWatch](images/dashboard-alarma-aws.png)
+
+Los log groups temporales conservan los logs durante 7 días.
 
 ## 8. Seguridad e IAM
 
-GitHub Actions se autenticará en AWS mediante OIDC. No se deben guardar access keys ni secret keys de AWS en GitHub.
+GitHub Actions se autentica en AWS mediante OIDC. El repositorio no guarda access keys ni secret keys de AWS.
 
-El rol `previewpanda-ci` existe actualmente, pero sus permisos todavía deben reducirse desde administración amplia a permisos mínimos antes de la fecha definida por el equipo.
+El rol `previewpanda-ci` utiliza la política mínima documentada en [docs/previewpanda-ci-policy.json](previewpanda-ci-policy.json).
 
-La matriz IAM definitiva deberá documentar:
+La matriz IAM documenta:
 
 - Identidad.
 - Permiso.
@@ -236,7 +238,7 @@ Las medidas principales de ahorro son:
 - Imágenes pequeñas en ECR.
 - Limpieza de imágenes asociadas a PRs cerrados.
 - Destrucción automática del entorno.
-- Limpieza nocturna de huérfanos.
+- Limpieza de huérfanos mediante `scripts/cleanup_orphans.py`.
 - Retención de logs limitada a 7 días.
 
 Cost Explorer mostró un costo observado de USD 0,00 para la ventana
@@ -256,9 +258,41 @@ El archivo [environments.csv](environments.csv) contiene la plantilla con estos 
 pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_cost_usd,notes
 ```
 
-Los workflows todavía conservan el punto de integración para agregar una fila al
-crear y otra al destruir cada entorno. El archivo no debe rellenarse con URL o
-costos inventados: las filas finales deben salir de ejecuciones reales.
+El registro automático se implementa mediante
+`scripts/registrar_entorno.sh`, que escribe
+en la rama `registro/environments` para no modificar directamente `main`.
+
+- El workflow de preview registra `created` al abrir o reabrir un PR y `updated`
+  en cada push posterior. La fila incluye el tag de ECR, la Function URL, el
+  commit y el enlace a la ejecución de GitHub Actions.
+- El workflow de destroy registra `destroyed` después de completar la
+  destrucción, borrar el state y eliminar las imágenes del PR. La duración se
+  calcula desde la fila `created` y el costo estimado usa
+  `PREVIEW_COST_USD_PER_HOUR`.
+- El script reintenta el push si la rama recibió otra actualización y no hace
+  fallar el deploy o el destroy cuando el registro no puede escribirse.
+
+Las URL, las fechas y los tags se toman de ejecuciones reales; la columna
+`estimated_cost_usd` representa una estimación basada en la duración del entorno.
+
+### Ejemplo real: PR #26
+
+El siguiente registro muestra la creación, actualización y destrucción del
+entorno asociado al PR #26:
+
+```csv
+pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_cost_usd,notes
+26,pr-26,created,2026-11-18T03:31:38Z,pr-26-2f13196,https://y2nwlmzzxkd27ewnbkjbs6ntnm0bngqj.lambda-url.us-east-1.on.aws/,,,commit=2f13196 run=https://github.com/NicooGon/previewpanda/actions/runs/44230884299
+26,pr-26,updated,2026-11-18T03:34:42Z,pr-26-b176149,https://y2nwlmzzxkd27ewnbkjbs6ntnm0bngqj.lambda-url.us-east-1.on.aws/,,,commit=b176149 run=https://github.com/NicooGon/previewpanda/actions/runs/44231284597
+26,pr-26,destroyed,2026-11-18T03:35:42Z,pr-26-b176149,,0.07,0.000007,mergeado run=https://github.com/NicooGon/previewpanda/actions/runs/44231473760
+```
+
+La primera fila registra la creación del entorno, la segunda un nuevo push
+que actualiza la imagen y la tercera el cierre del PR. En la fila `destroyed`,
+`lifetime_hours` indica la duración aproximada del entorno y
+`estimated_cost_usd` el costo estimado para ese período. Los enlaces de
+`notes` permiten relacionar cada fila con la ejecución correspondiente de
+GitHub Actions.
 
 ## 11. Diagramas
 
@@ -316,50 +350,25 @@ Archivo fuente: [diagrama-secuencia.puml](diagrams/diagrama-secuencia.puml).
 
 ![Diagrama 5 - Ciclo del PR](diagrams/diagrama5.svg)
 
-## 12. Estado actual y trabajo pendiente
+## 12. Componentes del proyecto
 
-### Completado en la aplicación
+- API Express con las rutas `/`, `/health`, `/error` y `/api-docs`.
+- Handler compatible con AWS Lambda y Dockerfile basado en la imagen oficial
+  AWS Lambda Node.js 22.
+- Workflow `Terraform Quality` con `fmt`, `validate`, TFLint y Checkov.
+- Workflows de preview y destroy con imagen en ECR, Terraform, Function URL y
+  limpieza de recursos temporales.
+- Script `scripts/registrar_entorno.sh` para registrar automáticamente los
+  eventos del entorno en la rama `registro/environments`.
+- Script `scripts/cleanup_orphans.py` para identificar previews cerrados que
+  superan el límite de antigüedad.
+- Registro `docs/environments.csv`, informe FinOps, matriz IAM y diagramas
+  PlantUML utilizados para describir la solución.
 
-- API Express funcional.
-- Swagger funcional.
-- Handler compatible con Lambda.
-- Dockerfile basado en la imagen oficial AWS Lambda Node.js 22.
-- Imagen local construida correctamente.
-- Prueba del handler `/health` dentro de la imagen.
-
-### Pendiente de integración (WIP)
-
-- Automatización final del CSV en los workflows.
-- Job nocturno de huérfanos.
-- Evidencias finales de la demo.
-
-## 13. Pruebas y material de apoyo
-
-La rúbrica no define una categoría independiente de “evidencias”. La
-consigna sí exige una demo en vivo y menciona conservar evidencia del
-`destroy`, del estado vacío y de la facturación. Por eso se separa lo mínimo
-obligatorio del material recomendado.
-
-### Mínimo obligatorio
-
-- Demo de abrir un PR, recibir la URL y cerrarlo o mergearlo.
-- Verificación de que el entorno se destruyó.
-- Evidencia final del estado vacío y de la facturación del mes.
-- Registro de creación/destrucción y costo por entorno.
-- Dashboard y alarma funcionando durante la presentación.
-
-### Material recomendado para explicar la demo
-
-- URL del preview y comentario del PR.
-- Acceso a `/health` y `/api-docs`.
-- Invocación de `/error` para disparar la alarma.
-- Capturas del dashboard, del workflow y de CloudWatch Logs.
-
-## 14. Conclusión
+## 13. Conclusión
 
 PreviewPanda implementa un patrón de entornos efímeros orientado a Pull Requests. La aplicación es pequeña a propósito: permite concentrar la evaluación en Terraform, aislamiento de states, CI/CD, autenticación federada, observabilidad y control de costos.
 
-La aplicación, la imagen, la infraestructura principal y los workflows de
-preview ya están integrados. El trabajo restante se concentra en cerrar el
-registro de entornos, el job nocturno, los diagramas, las evidencias y la
-documentación final.
+La aplicación, la imagen, la infraestructura principal, los workflows de
+preview, el control de calidad, la observabilidad y la documentación forman
+una solución coherente para crear, usar y destruir entornos efímeros por PR.
