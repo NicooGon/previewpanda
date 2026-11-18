@@ -9,3 +9,4 @@ pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_c
 29,pr-29,created,2026-11-18T21:07:35Z,pr-29-2036e8f,https://pbwuregofao6zi4tajaeb3fpxm0eddoh.lambda-url.us-east-1.on.aws/,,,commit=2036e8f run=https://github.com/NicooGon/previewpanda/actions/runs/44398009703
 29,pr-29,destroyed,2026-11-18T21:08:30Z,pr-29-2036e8f,,0.02,0.000002,mergeado run=https://github.com/NicooGon/previewpanda/actions/runs/44398250334
 30,pr-30,created,2026-11-18T21:45:23Z,pr-30-b3dc4f5,https://m64phpxuojdcotsp6cmkzmbzmm0oyhco.lambda-url.us-east-1.on.aws/,,,commit=b3dc4f5 run=https://github.com/NicooGon/previewpanda/actions/runs/44404469570
+30,pr-30,destroyed,2026-11-18T21:47:40Z,pr-30-b3dc4f5,,0.04,0.000004,mergeado run=https://github.com/NicooGon/previewpanda/actions/runs/44405040154
