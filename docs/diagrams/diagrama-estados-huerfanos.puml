@@ -1,0 +1,31 @@
+@startuml PreviewPanda - Flujo del script de huerfanos
+
+title PreviewPanda — cleanup_orphans.py: decision por entorno
+
+start
+:obtener_lista_de_entornos()\n(lista los state en S3);
+:consultar_estado_del_pr()\n(gh pr view);
+
+if (Estado del PR?) then (OPEN)
+  :No tocar\n(el PR sigue activo);
+  stop
+elseif (DESCONOCIDO\n(error de gh)) then (si)
+  :No tocar\n(por seguridad, ante la duda);
+  stop
+else (CERRADO)
+  :dias_sin_cambios\n(hoy - LastModified);
+
+  if (dias_sin_cambios > DIAS_LIMITE?) then (si)
+    floating note left: DIAS_LIMITE = 3 (default,\nconfigurable por variable de entorno)
+    :destruir_entorno();
+    :terraform destroy;
+    :borrar_el_archivo_de_state();
+    :borrar_las_imagenes_del_pr();
+    stop
+  else (no, todavia reciente)
+    :No tocar\n(le damos margen);
+    stop
+  endif
+endif
+
+@enduml

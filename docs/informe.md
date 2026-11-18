@@ -7,9 +7,6 @@
 **Repositorio:** `previewpanda`  
 **Rama de desarrollo de la aplicación:** `feature/app`  
 **Equipo:** `Nicolás González, Felipe Corderi, Agustín García`
-**Estado del informe:** borrador en construcción
-
-> Este documento se irá completando durante la integración de infraestructura y CI/CD. Los elementos marcados como **Pendiente** todavía no fueron verificados en AWS.
 
 ## 1. Resumen
 
@@ -265,22 +262,59 @@ costos inventados: las filas finales deben salir de ejecuciones reales.
 
 ## 11. Diagramas
 
-El informe utilizará dos diagramas:
+La consigna requiere un diagrama de arquitectura y el artifact propone además
+un diagrama de secuencia. Para explicar los controles principales del proyecto
+se incluyen cinco diagramas PlantUML, en el orden usado en la presentación.
 
-1. **Diagrama de secuencia:** muestra apertura/actualización/cierre del PR y la interacción entre GitHub, Actions, ECR, Terraform, Lambda y S3.
-2. **Diagrama de despliegue:** muestra los límites entre GitHub, AWS, ECR, S3, Lambda, Function URL y CloudWatch.
+### 11.1 Diagrama de despliegue AWS
 
-```text
-diagrama 1
-```
+Muestra los límites entre GitHub, GitHub Actions y AWS, además de ECR, S3,
+IAM, Lambda, Function URL, CloudWatch y AWS Budgets.
 
-```text
-diagrama 2
-```
+Archivo fuente: [diagrama-despliegue.puml](diagrams/diagrama-despliegue.puml).
 
-```text
-diagrama 3
-```
+![Diagrama 1 - Despliegue AWS](diagrams/diagrama1.png)
+
+### 11.2 Diagrama de actividad de limpieza de huérfanos
+
+Este es un diagrama de actividad: representa el algoritmo del job nocturno
+mediante acciones, decisiones y estados finales. Consulta si el PR sigue
+abierto, calcula la antigüedad del state y destruye solo los entornos cerrados
+que superan el límite definido.
+
+Archivo fuente: [diagrama-estados-huerfanos.puml](diagrams/diagrama-estados-huerfanos.puml).
+
+![Diagrama 2 - Limpieza de huérfanos](diagrams/diagrama2.png)
+
+### 11.3 Diagrama de secuencia de concurrencia
+
+Muestra cómo dos pushes sucesivos del mismo PR se serializan mediante el grupo
+`preview-pr-<n>` para evitar que dos ejecuciones modifiquen el mismo state al
+mismo tiempo.
+
+Archivo fuente: [diagrama-secuencia-concurrencia.puml](diagrams/diagrama-secuencia-concurrencia.puml).
+
+![Diagrama 3 - Concurrencia](diagrams/diagrama3.png)
+
+### 11.4 Diagrama de secuencia del workflow Terraform Quality
+
+Muestra el flujo de `fmt`, `validate`, TFLint y Checkov. También deja claro que
+este workflow no usa OIDC, no accede al state remoto y no crea ni destruye
+recursos AWS.
+
+Archivo fuente: [diagrama-secuencia-quality.puml](diagrams/diagrama-secuencia-quality.puml).
+
+![Diagrama 4 - Terraform Quality](diagrams/diagrama4.png)
+
+### 11.5 Diagrama de secuencia del ciclo del PR
+
+Muestra la apertura, actualización, prueba y cierre del Pull Request, junto
+con la interacción entre GitHub, Actions, OIDC, ECR, Terraform, S3, Lambda,
+Function URL y CloudWatch.
+
+Archivo fuente: [diagrama-secuencia.puml](diagrams/diagrama-secuencia.puml).
+
+![Diagrama 5 - Ciclo del PR](diagrams/diagrama5.svg)
 
 ## 12. Estado actual y trabajo pendiente
 
@@ -298,22 +332,28 @@ diagrama 3
 - Automatización final del CSV en los workflows.
 - Job nocturno de huérfanos.
 - Evidencias finales de la demo.
-- Archivos PlantUML de los diagramas de secuencia y despliegue.
 
-## 13. Evidencias para la entrega (TO-DO)
+## 13. Pruebas y material de apoyo
 
-La demostración final deberá conservar evidencia de:
+La rúbrica no define una categoría independiente de “evidencias”. La
+consigna sí exige una demo en vivo y menciona conservar evidencia del
+`destroy`, del estado vacío y de la facturación. Por eso se separa lo mínimo
+obligatorio del material recomendado.
 
-- PR abierto con comentario de Function URL.
-- API accesible mediante la URL.
-- Swagger accesible.
-- Ejecución de `/health`.
-- Error controlado y alarma 5xx.
-- PR cerrado o mergeado.
-- Recursos destruidos.
-- State eliminado.
-- Registro actualizado en `environments.csv`.
-- Ausencia de recursos y costos sobrantes.
+### Mínimo obligatorio
+
+- Demo de abrir un PR, recibir la URL y cerrarlo o mergearlo.
+- Verificación de que el entorno se destruyó.
+- Evidencia final del estado vacío y de la facturación del mes.
+- Registro de creación/destrucción y costo por entorno.
+- Dashboard y alarma funcionando durante la presentación.
+
+### Material recomendado para explicar la demo
+
+- URL del preview y comentario del PR.
+- Acceso a `/health` y `/api-docs`.
+- Invocación de `/error` para disparar la alarma.
+- Capturas del dashboard, del workflow y de CloudWatch Logs.
 
 ## 14. Conclusión
 

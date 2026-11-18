@@ -80,6 +80,31 @@ El CSV debe distinguir entre una estimación y un costo real. Mientras no exista
 un dato de facturación asociado al PR, `estimated_cost_usd` debe documentarse
 como estimación y no presentarse como una medición exacta.
 
+## Tarifa estimada para el CSV
+
+Para que el workflow pueda calcular un costo por entorno, se propone cargar la
+variable de repositorio:
+
+```text
+PREVIEW_COST_USD_PER_HOUR=0.0001
+```
+
+Es una tarifa nominal para la estimación, no una factura. Se basa en una Lambda
+de 512 MB con tráfico bajo y aproximadamente 60 invocaciones de 200 ms por
+hora. El cálculo aproximado de Lambda queda cerca de USD 0,0001 por hora; el
+valor redondeado también absorbe una parte mínima de logs y almacenamiento
+compartido. El costo real de la cuenta puede seguir apareciendo como USD 0,00
+por el free tier.
+
+La fórmula usada por el workflow es:
+
+```text
+estimated_cost_usd = lifetime_hours * PREVIEW_COST_USD_PER_HOUR
+```
+
+Si el equipo decide no cargar la variable, el workflow debe dejar el costo
+vacío y no escribir `0` como si fuera una medición real.
+
 ## Medidas de ahorro
 
 1. Lambda no mantiene servidores encendidos.

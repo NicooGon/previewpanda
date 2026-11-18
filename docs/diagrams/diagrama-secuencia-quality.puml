@@ -1,0 +1,40 @@
+@startuml PreviewPanda - Diagrama de secuencia (Quality)
+
+title PreviewPanda — Secuencia del workflow "Terraform Quality"
+
+actor Desarrollador as Dev
+participant "GitHub\n(Pull Request)" as PR
+participant "GitHub Actions" as GA
+participant "Terraform CLI" as TF
+participant "TFLint" as Lint
+participant "Checkov" as Checkov
+
+Dev -> PR : abre / push
+PR -> GA : dispara ci.yml
+
+GA -> GA : checkout del repo
+GA -> TF : instalar Terraform
+GA -> TF : fmt -check -recursive
+TF --> GA : ok / diff encontrado
+
+GA -> TF : init -reconfigure -backend=false
+note right
+  Sin backend: no hace falta
+  login a AWS para este job
+end note
+TF --> GA : providers descargados
+
+GA -> TF : validate
+TF --> GA : configuracion valida / error
+
+GA -> Lint : instalar TFLint
+GA -> Lint : tflint --init
+GA -> Lint : tflint
+Lint --> GA : hallazgos (si los hay)
+
+GA -> Checkov : escanear infra/\n(soft_fail = true)
+Checkov --> GA : resultado del escaneo\n(no bloquea el PR)
+
+GA -> PR : check "Terraform Quality"\n(success / failure)
+
+@enduml

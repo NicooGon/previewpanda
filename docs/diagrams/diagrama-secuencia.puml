@@ -1,0 +1,61 @@
+@startuml PreviewPanda - Diagrama de secuencia
+
+title PreviewPanda — Secuencia de Preview y Destroy
+
+actor Desarrollador as Dev
+actor "Revisor del PR" as Reviewer
+participant "GitHub\n(Pull Request)" as PR
+participant "GitHub Actions" as GA
+participant "AWS IAM\n(OIDC)" as IAM
+participant "ECR" as ECR
+participant "Terraform" as TF
+participant "Lambda" as Lambda
+participant "S3\n(state)" as S3
+participant "CloudWatch" as CW
+
+== Abrir o actualizar el PR ==
+
+Dev -> PR : abre / push
+PR -> GA : dispara preview.yml
+GA -> IAM : assume role\n(previewpanda-ci-minimal)
+IAM --> GA : credenciales temporales
+GA -> ECR : build & push imagen\n(si el tag no existe)
+GA -> TF : init\n(key = previews/pr-<n>)
+TF -> S3 : lee / crea state
+GA -> TF : apply -var env_name=pr-<n>
+TF -> IAM : crea rol pp-<n>-lambda-exec
+TF -> Lambda : crea funcion\n(image_uri de ECR)
+TF -> Lambda : crea Function URL
+TF -> CW : crea log group\n(retencion 7 dias)
+TF --> S3 : guarda state
+TF --> GA : output function_url
+GA -> PR : comenta URL + tag de imagen
+
+== El revisor prueba el entorno ==
+
+Reviewer -> Lambda : HTTP GET (Function URL)
+Lambda -> CW : escribe logs
+Lambda --> Reviewer : respuesta (200 OK)
+
+== Cerrar o mergear el PR ==
+
+PR -> GA : evento "closed"\ndispara destroy-preview.yml
+GA -> IAM : assume role
+GA -> TF : init\n(misma key del PR)
+GA -> TF : destroy -var env_name=pr-<n>
+TF -> Lambda : borra funcion + Function URL
+TF -> IAM : borra rol pp-<n>-lambda-exec
+TF -> CW : borra log group
+TF --> S3 : state queda vacio
+GA -> S3 : borra el archivo .tfstate
+GA -> ECR : borra la/s imagen/es\ndel PR (prefijo pr-<n>-)
+GA -> PR : actualiza comentario\n("entorno destruido")
+
+note over GA, S3
+  Si el destroy falla, no se borran
+  ni el state ni la imagen: quedan
+  disponibles para reintentar o para
+  que el job nocturno los detecte.
+end note
+
+@enduml
