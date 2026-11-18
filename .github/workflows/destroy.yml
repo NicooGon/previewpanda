@@ -1,6 +1,6 @@
 name: Destroy
 
-# Destrucción manual de todos los entornos
+# Destrucción manual de todos los entornos de preview.
 on:
   workflow_dispatch:
     inputs:
@@ -16,11 +16,11 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # OIDC
+  id-token: write   # OIDC hacia AWS
 
-# Compartido con deploy.yml (docs/Concurrencia.md)
+# Ver docs/Concurrencia.md
 concurrency:
-  group: production
+  group: destroy-manual
   cancel-in-progress: false
 
 env:
@@ -32,6 +32,7 @@ jobs:
   destroy:
     runs-on: ubuntu-latest
     steps:
+      # Solo desde main y con confirmación explícita
       - name: Validar ejecución
         env:
           CONFIRM: ${{ inputs.confirm }}
@@ -60,13 +61,13 @@ jobs:
           terraform_version: 1.11.x
           terraform_wrapper: false
 
+      # previews/pr-<n>/terraform.tfstate -> pr-<n>
       - name: Listar entornos de preview
         id: listar
         run: |
           keys=$(aws s3api list-objects-v2 --bucket "$TF_STATE_BUCKET" --prefix previews/ \
                    --query "Contents[?ends_with(Key, '/terraform.tfstate')].Key" --output text)
 
-          # previews/pr-<n>/terraform.tfstate -> pr-<n>
           envs=""
           for k in $keys; do
             [ "$k" = "None" ] && continue
@@ -78,43 +79,16 @@ jobs:
           echo "Entornos encontrados: ${envs:-ninguno}"
           echo "envs=$envs" >> "$GITHUB_OUTPUT"
 
+      # Sigue con los demás si uno falla; al final lista los fallidos
       - name: Destruir entornos de preview
         if: ${{ !inputs.solo_listar && steps.listar.outputs.envs != '' }}
-        working-directory: infra/preview
         env:
           ENVS: ${{ steps.listar.outputs.envs }}
         run: |
-          borrar_imagenes() {
-            local tags ids=() failures
-            tags=$(aws ecr list-images --repository-name "$ECR_REPOSITORY" \
-                     --filter tagStatus=TAGGED \
-                     --query "imageIds[?starts_with(imageTag, '$1-')].imageTag" \
-                     --output text)
-            if [ -z "$tags" ] || [ "$tags" = "None" ]; then
-              echo "No hay imágenes $1-* en ECR"
-              return 0
-            fi
-            for t in $tags; do ids+=("imageTag=$t"); done
-            failures=$(aws ecr batch-delete-image --repository-name "$ECR_REPOSITORY" \
-                         --image-ids "${ids[@]}" --query 'length(failures)' --output text)
-            [ "$failures" = "0" ]
-          }
-
           fallidos=""
           for env_name in $ENVS; do
             echo "::group::$env_name"
-            # State e imágenes se borran solo si el destroy salió bien
-            if terraform init -input=false -reconfigure \
-                 -backend-config="bucket=${TF_STATE_BUCKET}" \
-                 -backend-config="key=previews/${env_name}/terraform.tfstate" \
-               && terraform destroy -auto-approve -input=false -lock-timeout=5m \
-                    -var "env_name=${env_name}" \
-               && aws s3 rm "s3://${TF_STATE_BUCKET}/previews/${env_name}/terraform.tfstate" \
-               && borrar_imagenes "$env_name"; then
-              echo "$env_name destruido"
-            else
-              fallidos="$fallidos $env_name"
-            fi
+            bash scripts/destruir_entorno.sh "$env_name" || fallidos="$fallidos $env_name"
             echo "::endgroup::"
           done
 
