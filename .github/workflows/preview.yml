@@ -6,7 +6,7 @@ on:
 
 permissions:
   id-token: write       # OIDC: GitHub emite el token para asumir el rol en AWS
-  contents: read        # checkout del código
+  contents: write       # checkout y push de la fila a registro/environments
   pull-requests: write  # crear/editar el comentario del preview
 
 concurrency:
@@ -21,6 +21,8 @@ env:
 
 jobs:
   preview:
+    # El PR del registro solo trae el CSV: no crea entorno
+    if: github.head_ref != 'registro/environments'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del commit del PR
@@ -165,8 +167,19 @@ jobs:
               core.info('Comentario creado');
             }
 
-      # TODO(CSV): registrar la creación en docs/environments.csv
-      #            (PR, fecha, commit). Falta acordar con C cómo, porque main está protegido.
+      # Fila created (opened/reopened) o updated (synchronize) en docs/environments.csv.
+      # Un fallo del registro no marca el despliegue como fallido.
+      - name: Registrar entorno en el CSV
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT: ${{ github.event.action == 'synchronize' && 'updated' || 'created' }}
+          IMAGE_TAG: ${{ steps.image.outputs.tag }}
+          PREVIEW_URL: ${{ steps.tf.outputs.url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          bash scripts/registrar_entorno.sh "$EVENT" "$IMAGE_TAG" "$PREVIEW_URL" \
+            "commit=${HEAD_SHA::7} run=${RUN_URL}"
 
       # Si cualquier paso anterior falló, el comentario no debe seguir mostrando
       # la URL/commit viejos como si estuvieran actualizados

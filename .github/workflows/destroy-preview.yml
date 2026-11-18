@@ -6,7 +6,7 @@ on:
 
 permissions:
   id-token: write       # OIDC hacia AWS
-  contents: read        # checkout del código de infra
+  contents: write       # checkout y push de la fila a registro/environments
   pull-requests: write  # editar el comentario
 
 # Mismo grupo que preview.yml: si hay un apply corriendo, el destroy espera a que termine
@@ -22,6 +22,8 @@ env:
 
 jobs:
   destroy:
+    # El PR del registro no tiene entorno que destruir
+    if: github.head_ref != 'registro/environments'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout del commit del PR
@@ -100,7 +102,18 @@ jobs:
             exit 1
           fi
 
-      # TODO(CSV): registrar la destrucción en docs/environments.csv (PR, fecha, horas de vida)
+      # Fila destroyed con lifetime_hours y estimated_cost_usd (horas × tarifa).
+      # Solo corre si destroy, state y ECR salieron bien; un fallo del registro no marca el destroy como fallido.
+      - name: Registrar destrucción en el CSV
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_CREATED_AT: ${{ github.event.pull_request.created_at }}
+          COST_PER_HOUR: ${{ vars.PREVIEW_COST_USD_PER_HOUR }}
+          CLOSE_STATE: ${{ github.event.pull_request.merged && 'mergeado' || 'cerrado' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          bash scripts/registrar_entorno.sh destroyed "" "" "${CLOSE_STATE} run=${RUN_URL}"
 
       - name: Actualizar comentario del PR
         if: always()  # siempre: también tiene que avisar si el destroy falló
