@@ -37,7 +37,7 @@ GitHub Actions admite un run en ejecución y uno pendiente por grupo. Si llega o
 
 ## Segunda capa: lock del state
 
-El backend S3 usa `use_lockfile = true`, y `apply` y `destroy` se ejecutan con `-lock-timeout=5m`. Si una operación que no pasa por los grupos (el job nocturno o un `terraform` manual) toma el mismo state, la segunda espera hasta 5 minutos a que se libere el lock y, si no se libera, falla sin escribir.
+El backend S3 usa `use_lockfile = true`, y `plan`, `apply` y `destroy` se ejecutan con `-lock-timeout=5m`. Si una operación que no pasa por los grupos (el job nocturno, `destroy.yml` o un `terraform` manual) toma el mismo state, la segunda espera hasta 5 minutos a que se libere el lock y, si no se libera, falla sin escribir.
 
 ## Otros workflows
 
@@ -45,7 +45,7 @@ El backend S3 usa `use_lockfile = true`, y `apply` y `destroy` se ejecutan con `
 |---|---|---|
 | `ci.yml` | Ninguno | Hace `init -backend=false`: no lee ni escribe states. |
 | `nightly-cleanup.yml` | `nightly-cleanup` | Un solo job recorre todos los states, así que no puede usar el grupo de cada PR. Solo destruye PRs cerrados hace más de 3 días; si coincide con una reapertura, el lock del state hace esperar a uno de los dos. |
-| `deploy.yml` y `destroy.yml` | `production` (compartido) | Usan el state del entorno principal, separado de `previews/`. |
+| `destroy.yml` | `production` | Un solo job recorre todos los states de `previews/` (PRs abiertos y cerrados), así que no puede usar el grupo de cada PR. El grupo evita dos destroy manuales a la vez; si coincide con un preview, el lock del state hace esperar a uno de los dos. |
 
 ## Registro de entornos
 
