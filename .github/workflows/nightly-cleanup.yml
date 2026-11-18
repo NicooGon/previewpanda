@@ -1,0 +1,50 @@
+name: Nightly cleanup
+
+# Destruye entornos de preview huérfanos: PR cerrado y state sin cambios hace más de DIAS_LIMITE días.
+on:
+  schedule:
+    - cron: "0 6 * * *"  # 03:00 en Uruguay (UTC-3)
+  workflow_dispatch:
+    inputs:
+      dias_limite:
+        description: "Días sin cambios del state (-1 = todos los PRs cerrados; 9999 = solo listar)"
+        required: true
+        default: "3"
+
+permissions:
+  id-token: write       # OIDC hacia AWS
+  contents: read        # checkout del script y del módulo de Terraform
+  pull-requests: read   # gh pr view para saber si el PR está cerrado
+
+# Grupo propio: un job recorre todos los states (ver docs/Concurrencia.md)
+concurrency:
+  group: nightly-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      DIAS_LIMITE: ${{ inputs.dias_limite || '3' }}  # el schedule no tiene inputs: usa 3
+      GH_TOKEN: ${{ github.token }}                  # gh CLI dentro del script
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"                              # equivale a -input=false
+      TF_CLI_ARGS_destroy: "-lock-timeout=5m"        # espera el lock si un preview usa el mismo state
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Asumir rol por OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Instalar Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.11.x
+          terraform_wrapper: false
+
+      - name: Limpiar entornos huérfanos
+        run: python3 scripts/cleanup_orphans.py
