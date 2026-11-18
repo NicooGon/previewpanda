@@ -1,1 +1,2 @@
 pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_cost_usd,notes
+26,pr-26,created,2026-11-18T03:31:38Z,pr-26-2f13196,https://y2nwlmzzxkd27ewnbkjbs6ntnm0bngqj.lambda-url.us-east-1.on.aws/,,,commit=2f13196 run=https://github.com/NicooGon/previewpanda/actions/runs/44230884299
