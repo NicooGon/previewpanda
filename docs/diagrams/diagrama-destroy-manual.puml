@@ -1,0 +1,36 @@
+@startuml diagrama-destroy-manual
+
+title PreviewPanda — Secuencia de destroy.yml (destroy manual)
+
+actor "Integrante del equipo" as User
+participant "GitHub Actions" as GA
+participant "AWS IAM\n(OIDC)" as IAM
+participant "S3\n(state)" as S3
+participant "Terraform" as TF
+
+User -> GA : dispara destroy.yml\n(workflow_dispatch: confirm, solo_listar)
+
+GA -> GA : valida rama main\ny confirm == "destroy"
+alt Validacion falla
+  GA --> User : error, termina el workflow
+else Validacion ok
+  GA -> IAM : asume el rol por OIDC
+  GA -> S3 : lista previews/*/terraform.tfstate
+  S3 --> GA : lista de entornos pr-<n>
+
+  alt solo_listar = true
+    GA --> User : solo muestra los entornos encontrados
+  else solo_listar = false
+    loop por cada entorno encontrado
+      GA -> TF : scripts/destruir_entorno.sh pr-<n>
+      TF -> TF : destruye recursos de ese entorno
+      note right
+        Si uno falla, el loop sigue
+        con los demas entornos
+      end note
+    end
+    GA --> User : reporta los entornos\nque fallaron (si los hay)
+  end
+end
+
+@enduml

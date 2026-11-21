@@ -9,8 +9,7 @@ while (¿Queda un entorno por revisar?) is (sí)
   if (¿PR cerrado, mergeado o inexistente?) then (sí)
     if (¿Días enteros > DIAS_LIMITE?) then (sí)
       floating note left: DIAS_LIMITE vale 3 por defecto.
-      :Ejecutar terraform init y terraform destroy;
-      :Borrar el state de S3 y los tags del PR en ECR;
+      :scripts/destruir_entorno.sh\n(mismo script que usan\ndestroy-preview.yml y destroy.yml);
     else (no)
       :Conservar por antigüedad;
     endif

@@ -263,7 +263,7 @@ El entorno mantuvo la misma URL al pasar de la imagen `pr-26-2f13196` a `pr-26-b
 
 ## 11. Diagramas
 
-Los cinco diagramas en PlantUML muestran desde la arquitectura en AWS hasta los pasos que ejecuta GitHub Actions.
+Los siete diagramas en PlantUML muestran desde la arquitectura en AWS hasta los pasos que ejecuta GitHub Actions, con un diagrama de secuencia propio para cada workflow.
 
 ### 11.1 Diagrama de despliegue AWS
 
@@ -299,13 +299,29 @@ Archivo fuente: [diagrama-secuencia-quality.puml](diagrams/diagrama-secuencia-qu
 
 ![Diagrama 4 - Terraform Quality](diagrams/diagrama4.png)
 
-### 11.5 Diagrama de secuencia del ciclo del PR
+### 11.5 Diagrama de secuencia de preview.yml (apply)
 
-Sigue el ciclo del PR desde el despliegue hasta el destroy. El orden actual entre el plan, el apply, el registro en el CSV y el comentario del PR figura en la sección 5.
+Sigue el workflow `preview.yml`: assume role por OIDC, build & push condicional de la imagen, `terraform apply`, registro en el CSV y comentario con la URL en el PR.
 
-Archivo fuente: [diagrama-secuencia.puml](diagrams/diagrama-secuencia.puml).
+Archivo fuente: [diagrama-apply.puml](diagrams/diagrama-apply.puml).
 
-![Diagrama 5 - Ciclo del PR](diagrams/diagrama5.svg)
+![Diagrama 5 - Apply](diagrams/diagrama5.png)
+
+### 11.6 Diagrama de secuencia de destroy-preview.yml (destroy)
+
+Sigue el workflow `destroy-preview.yml` al cerrar o mergear el PR: `terraform destroy`, limpieza del state en S3, borrado de la imagen en ECR y registro de la destrucción en el CSV, incluyendo el caso en que Terraform falla.
+
+Archivo fuente: [diagrama-destroy.puml](diagrams/diagrama-destroy.puml).
+
+![Diagrama 6 - Destroy](diagrams/diagrama6.png)
+
+### 11.7 Diagrama de secuencia de destroy.yml (destroy manual)
+
+Sigue el workflow manual `destroy.yml` (`workflow_dispatch`): valida que se ejecute desde `main` y con la confirmación explícita, lista los entornos activos en S3 y, si no es solo listar, recorre cada uno destruyéndolo, dejando seguir el loop aunque alguno falle.
+
+Archivo fuente: [diagrama-destroy-manual.puml](diagrams/diagrama-destroy-manual.puml).
+
+![Diagrama 7 - Destroy manual](diagrams/diagrama7.png)
 
 ## 12. Resultado de las pruebas
 
