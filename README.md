@@ -43,7 +43,7 @@ En **Settings → Secrets and variables → Actions → Variables**, cargá esta
 | Variable | Valor |
 |---|---|
 | `AWS_ROLE_ARN` | ARN del rol IAM que asume GitHub Actions por OIDC. |
-| `AWS_REGION` | `us-east-1` en nuestro entorno. |
+| `AWS_REGION` | `us-east-1` en nuestro entorno. Tiene que coincidir con la región fija de `infra/preview/providers.tf` y `infra/preview/backend.tf`: si la cambiás, cambiá también esos dos archivos. |
 | `TF_STATE_BUCKET` | Nombre del bucket S3 del state. |
 | `ECR_REPOSITORY` | `previewpanda`, si usás el nombre que quedó definido en bootstrap. |
 | `PREVIEW_COST_USD_PER_HOUR` | Tarifa opcional para el CSV. Si la dejás vacía, el script registra la duración igual, pero sin costo. |
