@@ -29,6 +29,8 @@ Con esto, quien revisa el PR puede probar ese commit directo desde el navegador 
 | 7 | Política de concurrencia | Un grupo `preview-pr-<n>` que serializa las ejecuciones de un mismo PR. |
 | 8 | Registro y costo por entorno | Los workflows escriben en el CSV que vive en la rama `registro/environments`. El PR #26 muestra los tres eventos del ciclo completo. |
 
+**Control de calidad.** Cada PR ejecuta `Terraform Quality` para revisar el código de infraestructura con `fmt`, `validate`, TFLint y Checkov. El resultado se puede consultar en los checks del PR (ver [sección 3.2](#32-terraform-quality)).
+
 ## 3. La aplicación
 
 Hicimos una API de Node.js con Express, chica a propósito. Corre local como servidor HTTP, y en AWS corre en Lambda con una imagen de contenedor.
@@ -151,6 +153,8 @@ El repositorio ECR, el bucket S3, el proveedor OIDC y el rol de CI son compartid
 ## 5. Flujo de creación y destrucción
 
 ### Al abrir, actualizar o reabrir un PR
+
+Al abrir, actualizar o reabrir un PR, GitHub Actions inicia dos workflows independientes. **Terraform Quality** revisa el código de infraestructura con `fmt`, `validate`, TFLint y Checkov (ver [sección 3.2](#32-terraform-quality)). **Preview** genera el plan y despliega el entorno sin esperar el resultado de Quality.
 
 1. Un desarrollador abre, actualiza o reabre un Pull Request.
 2. GitHub Actions obtiene credenciales temporales por OIDC.

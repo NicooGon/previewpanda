@@ -31,6 +31,8 @@ filtro para los servicios relacionados con el proyecto: Lambda, S3 y ECR. El
 total observado fue de **USD 0,00**. En el desglose visible apareció S3, pero no
 se mostró un importe separado para ECR.
 
+![Cost Explorer muestra USD 0,00 para el período del 12 al 13 de noviembre de 2026](images/finops1.jpeg)
+
 Este valor sirve como evidencia del costo observado durante esa ventana, pero
 no debe presentarse como un costo exacto del PR #24: AWS puede redondear
 importes muy pequeños, demorar la imputación y mezclar el consumo con otros
@@ -44,6 +46,10 @@ La cuenta tiene activo el presupuesto mensual `previewpanda-presupuesto` por
 actual de **USD 0,00**, tres destinatarios con correo verificado y tres alertas
 asociadas a cada destinatario. La pestaña **Alertas** confirma los umbrales:
 50 % (USD 5,00), 80 % (USD 8,00) y 100 % (USD 10,00), todos sin superar.
+
+![AWS Budgets muestra el presupuesto mensual de USD 10 y USD 0,00 de gasto](images/finops2.jpeg)
+
+![Alertas de AWS Budgets configuradas al 50 %, 80 % y 100 %](images/finops3.jpeg)
 
 ## Recursos compartidos y temporales
 
@@ -115,16 +121,3 @@ vacío y no escribir `0` como si fuera una medición real.
 5. CloudWatch Logs conserva datos durante 7 días.
 6. El proyecto utiliza una sola región.
 7. El presupuesto de AWS avisa al 50 %, 80 % y 100 %.
-
-## Evidencia que falta completar
-
-- Una fila `created` y una fila `destroyed` en `docs/environments.csv`.
-- Cálculo de `lifetime_hours` del PR de demostración.
-- Confirmación de que no quedan Lambda, imágenes ni states después del destroy.
-
-## Conclusión
-
-El diseño mantiene bajo el costo porque Lambda escala a cero y los recursos
-temporales tienen destrucción automática. La cifra inicial esperada es baja,
-pero la entrega final debe separar claramente la proyección del proyecto de la
-facturación observada en AWS.
