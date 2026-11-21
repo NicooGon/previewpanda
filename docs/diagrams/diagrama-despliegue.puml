@@ -47,29 +47,36 @@ cloud "AWS (us-east-1)" as aws {
   }
 }
 
-dev --> pr : abre o actualiza
-pr --> wf_preview : dispara preview
-pr --> wf_destroy : dispara destroy al cerrar
-gha --> role_ci : asume el rol vía OIDC
-wf_preview --> image : publica la imagen
-wf_preview --> lambda : terraform apply
-wf_preview ..> pr : comenta URL y tag
-gha --> registro : registra eventos
-gha --> s3state : lee o actualiza el state
-wf_destroy --> lambda : terraform destroy
-wf_destroy --> image : borra imágenes del PR
+dev --> pr : 1. abre o actualiza
+pr --> wf_preview : 2. dispara preview
+gha --> role_ci : 3. asume el rol vía OIDC
+wf_preview --> image : 4. publica la imagen
+image --> lambda : 5. imagen del PR
+wf_preview --> lambda : 6. terraform apply
+lambda --> role_lambda : 7. usa el rol de ejecución
+gha --> s3state : 8. lee o actualiza el state
+gha --> registro : 9. registra eventos
+wf_preview ..> pr : 10. comenta URL y tag
 
-image --> lambda : imagen del PR
-lambda --> role_lambda : usa el rol de ejecución
-user --> url : HTTP GET
-url --> lambda : invoca la API
-lambda --> logs : escribe logs
-logs --> metric : preview_test_error
-metric --> alarm : alimenta el panel y la alarma
+user --> url : 11. HTTP GET
+url --> lambda : 12. invoca la API
+lambda --> logs : 13. escribe logs
+logs --> metric : 14. preview_test_error
+metric --> alarm : 15. alimenta el panel y la alarma
+
+pr --> wf_destroy : 16. dispara destroy al cerrar
+wf_destroy --> lambda : 17. terraform destroy
+wf_destroy --> image : 18. borra imágenes del PR
 
 note right of s3state
   Un state distinto
   por cada PR
+end note
+
+note bottom of role_ci
+  Acotado a pp-* y al
+  repo previewpanda.
+  Sin AdministratorAccess.
 end note
 
 @enduml
