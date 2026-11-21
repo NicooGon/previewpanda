@@ -15,3 +15,4 @@ pr_number,environment,event,occurred_at,image_tag,url,lifetime_hours,estimated_c
 32,pr-32,created,2026-11-18T22:38:17Z,pr-32-be22444,https://cg2ht3333ocisebdnxpcmwox3i0kxcwa.lambda-url.us-east-1.on.aws/,,,commit=be22444 run=https://github.com/NicooGon/previewpanda/actions/runs/44413282913
 32,pr-32,destroyed,2026-11-18T22:39:27Z,pr-32-be22444,,0.02,0.000002,mergeado run=https://github.com/NicooGon/previewpanda/actions/runs/44413593229
 33,pr-33,created,2026-11-21T19:50:07Z,pr-33-a5c543d,https://7f5wqox2btgrepsc477aihqktq0nlgta.lambda-url.us-east-1.on.aws/,,,commit=a5c543d run=https://github.com/NicooGon/previewpanda/actions/runs/44942954980
+33,pr-33,updated,2026-11-21T20:40:18Z,pr-33-ef88de1,https://7f5wqox2btgrepsc477aihqktq0nlgta.lambda-url.us-east-1.on.aws/,,,commit=ef88de1 run=https://github.com/NicooGon/previewpanda/actions/runs/44947416513
