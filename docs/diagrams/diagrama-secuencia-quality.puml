@@ -1,0 +1,48 @@
+@startuml diagrama4
+
+title PreviewPanda — Secuencia del workflow "Terraform Quality"
+
+actor Desarrollador as Dev
+participant "GitHub\n(Pull Request)" as PR
+participant "GitHub Actions" as GA
+participant "Terraform CLI" as TF
+participant "TFLint" as Lint
+participant "Checkov" as Checkov
+
+Dev -> PR : abre el PR, hace push o lo reabre
+PR -> GA : dispara ci.yml
+
+== Preparar el runner ==
+
+GA -> GA : checkout del repo
+GA -> TF : instalar Terraform
+
+== Revisar infra/preview ==
+
+GA -> TF : fmt -check -recursive
+TF --> GA : formato correcto o error
+
+GA -> TF : init -reconfigure -backend=false
+TF --> GA : proveedores inicializados
+
+GA -> TF : validate
+TF --> GA : configuración válida o error
+
+GA -> Lint : instalar TFLint
+GA -> Lint : tflint --init
+GA -> Lint : tflint
+Lint --> GA : resultado del lint
+
+== Escanear infra/ ==
+
+GA -> Checkov : escanear Terraform (soft_fail: true)
+Checkov --> GA : informe de hallazgos
+
+note over GA, Checkov
+  Si falla un paso antes de Checkov, el job se detiene.
+  Los hallazgos de Checkov se informan sin fallar el job.
+end note
+
+GA -> PR : resultado del check quality
+
+@enduml

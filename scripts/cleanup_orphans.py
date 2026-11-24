@@ -6,7 +6,6 @@ from datetime import datetime, timezone
 NOMBRE_DEL_BUCKET = "previewpanda-tfstate-nico2026"
 CARPETA_DE_PREVIEWS = "previews/"
 DIAS_LIMITE = int(os.environ.get("DIAS_LIMITE", "3"))
-CARPETA_DEL_MODULO_TERRAFORM = "infra/preview"
 REPOSITORIO_GITHUB = "NicooGon/previewpanda"
 NOMBRE_DEL_REPOSITORIO_ECR = "previewpanda"
 
@@ -82,77 +81,23 @@ def consultar_estado_del_pr(numero_de_pr):
     return "DESCONOCIDO"
 
 
-def borrar_el_archivo_de_state(ruta_del_archivo):
-    """Borra el archivo de state en S3 despues de destruir el entorno."""
-
-    subprocess.run(
-        [
-            "aws", "s3api", "delete-object",
-            "--bucket", NOMBRE_DEL_BUCKET,
-            "--key", ruta_del_archivo,
-        ],
-        check=True,
-    )
-
-
-def borrar_las_imagenes_del_pr(numero_de_pr):
-    """Borra en ECR las imagenes que pertenecen a este PR (tag pr-<n>-<sha>)."""
-
-    prefijo_del_tag = "pr-" + numero_de_pr + "-"
-
-    comando_listar = [
-        "aws", "ecr", "list-images",
-        "--repository-name", NOMBRE_DEL_REPOSITORIO_ECR,
-        "--output", "json",
-    ]
-    resultado = subprocess.run(comando_listar, capture_output=True, text=True, check=True)
-    imagenes = json.loads(resultado.stdout).get("imageIds", [])
-
-    imagenes_del_pr = [
-        imagen for imagen in imagenes
-        if imagen.get("imageTag", "").startswith(prefijo_del_tag)
-    ]
-
-    if not imagenes_del_pr:
-        return
-
-    comando_borrar = [
-        "aws", "ecr", "batch-delete-image",
-        "--repository-name", NOMBRE_DEL_REPOSITORIO_ECR,
-        "--image-ids", json.dumps(imagenes_del_pr),
-    ]
-    subprocess.run(comando_borrar, check=True)
-    print("Imagenes de ECR borradas:", [i["imageTag"] for i in imagenes_del_pr])
-
-
-def destruir_entorno(numero_de_pr, ruta_del_archivo):
-    """Corre terraform destroy sobre el state de un PR puntual."""
+def destruir_entorno(numero_de_pr):
+    """Llama al mismo script bash que usan destroy-preview.yml y destroy.yml."""
 
     nombre_del_entorno = "pr-" + numero_de_pr
     print("Destruyendo entorno huerfano:", nombre_del_entorno)
 
-    subprocess.run(
-        [
-            "terraform", "init",
-            "-reconfigure",
-            "-backend-config=key=" + ruta_del_archivo,
-        ],
-        cwd=CARPETA_DEL_MODULO_TERRAFORM,
-        check=True,
-    )
+    variables_de_entorno = {
+        **os.environ,
+        "TF_STATE_BUCKET": NOMBRE_DEL_BUCKET,
+        "ECR_REPOSITORY": NOMBRE_DEL_REPOSITORIO_ECR,
+    }
 
     subprocess.run(
-        [
-            "terraform", "destroy",
-            "-auto-approve",
-            "-var=env_name=" + nombre_del_entorno,
-        ],
-        cwd=CARPETA_DEL_MODULO_TERRAFORM,
+        ["bash", "scripts/destruir_entorno.sh", nombre_del_entorno],
+        env=variables_de_entorno,
         check=True,
     )
-
-    borrar_el_archivo_de_state(ruta_del_archivo)
-    borrar_las_imagenes_del_pr(numero_de_pr)
 
 
 def main():
@@ -163,7 +108,6 @@ def main():
 
     for entorno in entornos:
         numero_de_pr = entorno["numero_de_pr"]
-        ruta_del_archivo = entorno["ruta_del_archivo"]
         dias_sin_cambios = entorno["dias_sin_cambios"]
         nombre_del_entorno = "pr-" + numero_de_pr
 
@@ -181,7 +125,7 @@ def main():
             print(nombre_del_entorno, "-> cerrado, pero todavia no pasaron", DIAS_LIMITE, "dias.")
             continue
 
-        destruir_entorno(numero_de_pr, ruta_del_archivo)
+        destruir_entorno(numero_de_pr)
 
     print("Listo, revision terminada.")
 

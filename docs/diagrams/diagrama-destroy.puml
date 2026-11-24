@@ -1,0 +1,33 @@
+@startuml diagrama-destroy
+
+title PreviewPanda — Secuencia de destroy-preview.yml (destroy)
+
+participant "GitHub\n(Pull Request)" as PR
+participant "GitHub Actions" as GA
+participant "AWS IAM\n(OIDC)" as IAM
+participant "Terraform" as TF
+participant "Lambda" as Lambda
+participant "S3\n(state)" as S3
+participant "CloudWatch" as CW
+participant "ECR" as ECR
+participant "Rama registro/environments" as CSV
+
+PR -> GA : evento "closed"\ndispara destroy-preview.yml
+GA -> IAM : asume el rol por OIDC
+GA -> TF : scripts/destruir_entorno.sh\n(init + destroy)
+alt Terraform completa el destroy
+  TF -> Lambda : elimina funcion y Function URL
+  TF -> IAM : elimina rol pp-pr-<n>-lambda-exec
+  TF -> CW : elimina log group
+  TF --> S3 : guarda el state sin recursos
+  GA -> S3 : borra el objeto activo del state\n(dentro de destruir_entorno.sh)
+  GA -> ECR : elimina los tags del PR\n(dentro de destruir_entorno.sh)
+  opt La limpieza de S3 y ECR termina bien
+    GA -> CSV : scripts/registrar_entorno.sh destroyed\n(duracion y costo estimado)
+  end
+else Terraform devuelve un error
+  GA -> GA : omite la limpieza de S3 y ECR
+end
+GA -> PR : actualiza el comentario con el resultado
+
+@enduml

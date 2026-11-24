@@ -1,0 +1,123 @@
+# Informe FinOps de PreviewPanda
+
+## Alcance
+
+PreviewPanda crea una Lambda temporal por Pull Request y la elimina cuando el
+PR se cierra o se mergea. El objetivo de FinOps es demostrar que los recursos
+temporales tienen una vida limitada y que el equipo puede estimar, registrar y
+controlar su costo.
+
+## Supuestos de la estimación
+
+| Concepto | Decisión del proyecto |
+|---|---|
+| Proveedor | AWS |
+| Región | `us-east-1` |
+| Cómputo | Lambda con imagen de contenedor, bajo demanda y escala a cero |
+| Logs | CloudWatch Logs con retención de 7 días |
+| Imágenes | Un repositorio ECR compartido y tags por PR/commit |
+| State | Un objeto S3 por PR, con versionado y bloqueo |
+| Presupuesto | USD 10 mensuales |
+| Alertas de presupuesto | 50 %, 80 % y 100 % |
+| Referencia inicial | USD 0–2 mensuales para el alcance de demostración |
+
+La cifra de USD 0–2 es una referencia del plan del proyecto, no una factura
+real. El costo final debe comprobarse en AWS Billing o Cost Explorer.
+
+## Costo observado en la demo
+
+En Cost Explorer se consultó el período **12/11/2026–13/11/2026**, usando un
+filtro para los servicios relacionados con el proyecto: Lambda, S3 y ECR. El
+total observado fue de **USD 0,00**. En el desglose visible apareció S3, pero no
+se mostró un importe separado para ECR.
+
+![Cost Explorer muestra USD 0,00 para el período del 12 al 13 de noviembre de 2026](images/finops1.jpeg)
+
+Este valor sirve como evidencia del costo observado durante esa ventana, pero
+no debe presentarse como un costo exacto del PR #24: AWS puede redondear
+importes muy pequeños, demorar la imputación y mezclar el consumo con otros
+recursos de la cuenta. Por eso el CSV conserva `estimated_cost_usd` como una
+estimación por tiempo de vida hasta contar con una imputación específica.
+
+## Presupuesto de AWS
+
+La cuenta tiene activo el presupuesto mensual `previewpanda-presupuesto` por
+**USD 10,00**, iniciado el 01/11/2026. La captura disponible muestra un gasto
+actual de **USD 0,00**, tres destinatarios con correo verificado y tres alertas
+asociadas a cada destinatario. La pestaña **Alertas** confirma los umbrales:
+50 % (USD 5,00), 80 % (USD 8,00) y 100 % (USD 10,00), todos sin superar.
+
+![AWS Budgets muestra el presupuesto mensual de USD 10 y USD 0,00 de gasto](images/finops2.jpeg)
+
+![Alertas de AWS Budgets configuradas al 50 %, 80 % y 100 %](images/finops3.jpeg)
+
+## Recursos compartidos y temporales
+
+### Compartidos
+
+- Repositorio ECR.
+- Bucket S3 del state.
+- Proveedor OIDC y rol de CI.
+- Presupuesto de AWS.
+- Dashboard y alarma de CloudWatch.
+
+### Por Pull Request
+
+- Lambda `pp-pr-<n>`.
+- Function URL.
+- Rol de ejecución.
+- Log group con retención de 7 días.
+- Imagen `pr-<n>-<sha>` en ECR.
+- Objeto de state `previews/pr-<n>/terraform.tfstate`.
+
+Los recursos temporales son los que deben desaparecer al cerrar o mergear el
+PR. Mantenerlos vivos es el principal riesgo de costo innecesario.
+
+## Fórmula de registro por entorno
+
+Para cada entorno se registran:
+
+```text
+lifetime_hours = (destroyed_at - created_at) en horas
+estimated_cost_usd = costo estimado del entorno durante lifetime_hours
+```
+
+El CSV debe distinguir entre una estimación y un costo real. Mientras no exista
+un dato de facturación asociado al PR, `estimated_cost_usd` debe documentarse
+como estimación y no presentarse como una medición exacta.
+
+## Tarifa estimada para el CSV
+
+Para que el workflow pueda calcular un costo por entorno, se propone cargar la
+variable de repositorio:
+
+```text
+PREVIEW_COST_USD_PER_HOUR=0.0001
+```
+
+Es una tarifa nominal para la estimación, no una factura. Se basa en una Lambda
+de 512 MB con tráfico bajo y aproximadamente 60 invocaciones de 200 ms por
+hora. El cálculo aproximado de Lambda queda cerca de USD 0,0001 por hora; el
+valor redondeado también absorbe una parte mínima de logs y almacenamiento
+compartido. El costo real de la cuenta puede seguir apareciendo como USD 0,00
+por el free tier.
+
+La fórmula usada por el workflow es:
+
+```text
+estimated_cost_usd = lifetime_hours * PREVIEW_COST_USD_PER_HOUR
+```
+
+Si el equipo decide no cargar la variable, el workflow debe dejar el costo
+vacío y no escribir `0` como si fuera una medición real.
+
+## Medidas de ahorro
+
+1. Lambda no mantiene servidores encendidos.
+2. Los entornos se destruyen al cerrar o mergear el PR.
+3. Un job nocturno elimina previews huérfanos de más de 3 días.
+4. ECR conserva solamente las imágenes necesarias según su regla de ciclo de
+   vida.
+5. CloudWatch Logs conserva datos durante 7 días.
+6. El proyecto utiliza una sola región.
+7. El presupuesto de AWS avisa al 50 %, 80 % y 100 %.

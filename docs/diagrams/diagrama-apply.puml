@@ -1,0 +1,38 @@
+@startuml diagrama-apply
+
+title PreviewPanda — Secuencia de preview.yml (apply)
+
+actor Desarrollador as Dev
+participant "GitHub\n(Pull Request)" as PR
+participant "GitHub Actions" as GA
+participant "AWS IAM\n(OIDC)" as IAM
+participant "ECR" as ECR
+participant "Terraform" as TF
+participant "Lambda" as Lambda
+participant "S3\n(state)" as S3
+participant "CloudWatch" as CW
+participant "Rama registro/environments" as CSV
+
+Dev -> PR : abre, actualiza o reabre
+PR -> GA : dispara preview.yml
+GA -> IAM : asume el rol previewpanda-ci por OIDC
+IAM --> GA : credenciales temporales
+GA -> ECR : login
+GA -> ECR : el tag pr-<n>-<sha7> ya existe?
+opt El tag todavia no existe
+  GA -> GA : construye la imagen de app/
+  GA -> ECR : publica la imagen
+end
+GA -> TF : init con el state del PR
+TF -> S3 : lee previews/pr-<n>/terraform.tfstate
+GA -> TF : plan\n(env_name, commit_sha, image_uri)
+GA -> TF : apply del plan generado
+TF -> IAM : gestiona rol pp-pr-<n>-lambda-exec
+TF -> CW : gestiona log group (7 dias)
+TF -> Lambda : crea o actualiza funcion y Function URL
+TF --> S3 : guarda state
+TF --> GA : output function_url
+GA -> CSV : scripts/registrar_entorno.sh\n(created o updated)
+GA -> PR : scripts/comentario_pr.js\n(URL, imagen y resumen del plan)
+
+@enduml

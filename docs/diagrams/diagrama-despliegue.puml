@@ -1,0 +1,82 @@
+@startuml diagrama1
+
+title PreviewPanda — Entornos efímeros por Pull Request
+
+skinparam nodesep 50
+skinparam ranksep 60
+skinparam ArrowFontSize 11
+skinparam defaultTextAlignment center
+
+actor "Desarrollador" as dev
+actor "Revisor del PR" as user
+
+node "GitHub" {
+  component "Pull Request" as pr
+  artifact "CSV en registro/environments" as registro
+}
+
+node "GitHub Actions (runner)" as gha {
+  artifact "preview.yml" as wf_preview
+  artifact "destroy-preview.yml" as wf_destroy
+}
+
+cloud "AWS (us-east-1)" as aws {
+
+  node "IAM" {
+    component "previewpanda-ci\n(rol de CI por OIDC)" as role_ci
+    component "pp-pr-<n>-lambda-exec\n(rol de ejecución)" as role_lambda
+  }
+
+  node "ECR" {
+    artifact "repo previewpanda\nimagen pr-<n>-<sha7>" as image
+  }
+
+  node "S3" {
+    database "previewpanda-tfstate-nico2026" as s3state
+  }
+
+  node "AWS Lambda" {
+    component "pp-pr-<n>\n(API Express en contenedor)" as lambda
+    component "Function URL pública" as url
+  }
+
+  node "CloudWatch" {
+    database "/aws/lambda/pp-pr-<n>\n(7 días)" as logs
+    component "PreviewTestErrors\n(filtro del PR #24)" as metric
+    component "Dashboard y alarma\n(demo del PR #24)" as alarm
+  }
+}
+
+dev --> pr : 1. abre o actualiza
+pr --> wf_preview : 2. dispara preview
+gha --> role_ci : 3. asume el rol vía OIDC
+wf_preview --> image : 4. publica la imagen
+image --> lambda : 5. imagen del PR
+wf_preview --> lambda : 6. terraform apply
+lambda --> role_lambda : 7. usa el rol de ejecución
+gha --> s3state : 8. lee o actualiza el state
+gha --> registro : 9. registra eventos
+wf_preview ..> pr : 10. comenta URL y tag
+
+user --> url : 11. HTTP GET
+url --> lambda : 12. invoca la API
+lambda --> logs : 13. escribe logs
+logs --> metric : 14. preview_test_error
+metric --> alarm : 15. alimenta el panel y la alarma
+
+pr --> wf_destroy : 16. dispara destroy al cerrar
+wf_destroy --> lambda : 17. terraform destroy
+wf_destroy --> image : 18. borra imágenes del PR
+
+note right of s3state
+  Un state distinto
+  por cada PR
+end note
+
+note bottom of role_ci
+  Acotado a pp-* y al
+  repo previewpanda.
+  Sin AdministratorAccess.
+end note
+
+@enduml

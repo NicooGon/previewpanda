@@ -1,0 +1,22 @@
+@startuml diagrama2
+
+title PreviewPanda — Limpieza de huérfanos por entorno
+
+start
+:Listar los states de previews en S3\ny calcular días desde LastModified;
+while (¿Queda un entorno por revisar?) is (sí)
+  :Consultar el PR con gh pr view;
+  if (¿PR cerrado, mergeado o inexistente?) then (sí)
+    if (¿Días enteros > DIAS_LIMITE?) then (sí)
+      floating note left: DIAS_LIMITE vale 3 por defecto.
+      :scripts/destruir_entorno.sh\n(mismo script que usan\ndestroy-preview.yml y destroy.yml);
+    else (no)
+      :Conservar por antigüedad;
+    endif
+  else (abierto o estado desconocido)
+    :Conservar el entorno;
+  endif
+endwhile (no)
+stop
+
+@enduml

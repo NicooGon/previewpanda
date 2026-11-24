@@ -1,0 +1,40 @@
+@startuml diagrama3
+
+title PreviewPanda — Dos pushes seguidos al mismo PR (concurrency group)
+
+actor Desarrollador as Dev
+participant "GitHub" as GH
+participant "Cola de Actions\n(group: preview-pr-<n>)" as Queue
+participant "Run A\n(preview.yml)" as RunA
+participant "Run B\n(preview.yml)" as RunB
+participant "S3 (state)" as S3
+
+Dev -> GH : push 1 al PR #<n>
+GH -> Queue : encola Run A\n(group preview-pr-<n>)
+Queue -> RunA : arranca\n(cola vacía)
+RunA -> S3 : terraform apply\n(usa el lock del state)
+
+Dev -> GH : push 2, a los pocos segundos
+GH -> Queue : encola Run B\n(mismo group)
+
+note over Queue
+  cancel-in-progress: false
+  Run B NO cancela a Run A:
+  espera a que termine.
+end note
+
+Queue -> RunB : en espera...
+RunA -> S3 : termina el apply,\nlibera el state
+RunA --> GH : check "preview" (success)
+
+Queue -> RunB : arranca al terminar Run A
+RunB -> S3 : terraform apply\n(con el commit 2)
+RunB -> S3 : termina el apply,\nlibera el state
+RunB --> GH : check "preview" (success)
+
+note over Queue, S3
+  Preview y Destroy comparten el grupo por PR.
+  El backend de S3 también bloquea el state.
+end note
+
+@enduml
