@@ -148,7 +148,7 @@ Elegimos Lambda porque la API recibe poco tráfico y se invoca bajo demanda, no 
 | Lock del state | `use_lockfile = true` |
 | Rol de CI | `previewpanda-ci` |
 
-El repositorio ECR, el bucket S3, el proveedor OIDC y el rol de CI son compartidos entre todos los previews. Cada PR tiene su propia Lambda, su Function URL, su rol de ejecución, su grupo de logs, su state y sus imágenes. El dashboard y la alarma los configuramos en la consola para la prueba de observabilidad del PR #24.
+El repositorio ECR, el bucket S3, el proveedor OIDC y el rol de CI son compartidos entre todos los previews. Cada PR tiene su propia Lambda, su Function URL, su rol de ejecución, su grupo de logs, su state y sus imágenes. El dashboard y la alarma los configuramos en la consola para la prueba de observabilidad del PR #35.
 
 ## 5. Flujo de creación y destrucción
 
@@ -199,9 +199,9 @@ Preview y Destroy preview comparten ese mismo grupo. En el diagrama de concurren
 
 ## 7. Observabilidad
 
-Configuramos el dashboard y la alarma desde la consola de AWS para el PR #24, con la imagen `pr-24-626cda2`. Para probar la alarma llamamos a `GET /error` desde la Function URL. La API responde con un 500 y escribe `preview_test_error` en CloudWatch Logs. Un filtro cuenta esas entradas en la métrica propia `PreviewTestErrors`.
+Configuramos el dashboard y la alarma desde la consola de AWS para el PR #35, con la imagen `pr-35-074b400`. Para probar la alarma llamamos a `GET /error` desde la Function URL. La API responde con un 500 y escribe `preview_test_error` en CloudWatch Logs. Un filtro cuenta esas entradas en la métrica propia `PreviewTestErrors`.
 
-En la captura se ven cinco errores de prueba, la alarma `previewpanda-pr-24-error` activada, y el panel con las métricas de Lambda `Duration`, `Errors`, `Invocations` y `Throttles`. Terraform configura la retención de los log groups en 7 días.
+En la captura se ven cinco errores de prueba, la alarma `previewpanda-pr-35-error` activada, y el panel con las métricas de Lambda `Duration`, `Errors`, `Invocations` y `Throttles`. Terraform configura la retención de los log groups en 7 días.
 
 ![Dashboard y alarma de CloudWatch](images/dashboard-alarma-aws.png)
 
@@ -226,7 +226,7 @@ Las medidas que más ayudan a bajar el costo:
 - Limpieza programada de entornos que quedaron huérfanos.
 - Retención de logs de solo 7 días.
 
-En Cost Explorer vimos un costo de USD 0,00 para la ventana del 12/11/2026 al 13/11/2026, en los servicios que consultamos. Ese dato es de toda la cuenta, no podemos atribuirle un importe exacto al PR #24. Además tenemos activo el presupuesto mensual `previewpanda-presupuesto` por USD 10,00, con tres destinatarios verificados y sus tres alertas correspondientes. La pestaña de alertas confirma los umbrales: 50 % (USD 5,00), 80 % (USD 8,00) y 100 % (USD 10,00), ninguno superado en la captura. El rango de USD 0-2 es el que corresponde al alcance de la demo.
+En Cost Explorer vimos un costo de USD 0,00 para la ventana del 12/11/2026 al 13/11/2026, en los servicios que consultamos. Ese dato es de toda la cuenta, no podemos atribuirle un importe exacto al PR #35. Además tenemos activo el presupuesto mensual `previewpanda-presupuesto` por USD 10,00, con tres destinatarios verificados y sus tres alertas correspondientes. La pestaña de alertas confirma los umbrales: 50 % (USD 5,00), 80 % (USD 8,00) y 100 % (USD 10,00), ninguno superado en la captura. El rango de USD 0-2 es el que corresponde al alcance de la demo.
 
 ## 10. Registro de entornos
 
@@ -257,7 +257,7 @@ Armamos siete diagramas en PlantUML, desde la arquitectura general en AWS hasta 
 
 ### 11.1 Diagrama de despliegue AWS
 
-Muestra qué queda en GitHub y qué se ejecuta en AWS, cómo el revisor llega a la API, y cómo los logs del PR #24 alimentan la métrica y la alarma.
+Muestra qué queda en GitHub y qué se ejecuta en AWS, cómo el revisor llega a la API, y cómo los logs del PR #35 alimentan la métrica y la alarma.
 
 Archivo fuente: [diagrama-despliegue.puml](diagrams/diagrama-despliegue.puml).
 
@@ -313,4 +313,4 @@ Archivo fuente: [diagrama-destroy-manual.puml](diagrams/diagrama-destroy-manual.
 
 ## 12. Resultado de las pruebas
 
-En el PR #24 probamos la API desplegada y activamos la alarma de CloudWatch con `/error`. En el PR #26 el CSV quedó con el registro completo: el despliegue, el cambio de imagen después de un push, y el destroy tras el merge. El procedimiento para repetir el ciclo está en el [README](../README.md).
+En el PR #35 probamos la API desplegada y activamos la alarma de CloudWatch con `/error`. En el PR #26 el CSV quedó con el registro completo: el despliegue, el cambio de imagen después de un push, y el destroy tras el merge. El procedimiento para repetir el ciclo está en el [README](../README.md).
