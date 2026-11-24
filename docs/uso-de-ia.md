@@ -19,3 +19,4 @@ Estos ejemplos resumen consultas hechas durante el proyecto.
 - Usamos las sugerencias para organizar y redactar la documentación. Contrastamos los detalles técnicos con los archivos del repositorio, en particular los workflows, antes de describir un paso como implementado.
 - Para los resultados de la demo, nos apoyamos en la captura de CloudWatch del PR #24 y en los registros del CSV del PR #26. El [informe](informe.md) distingue lo observado en AWS de lo estimado.
 - Evitamos compartir credenciales, tokens o datos sensibles en las consultas. El equipo revisa la versión que incorpora al repositorio.
+ 
