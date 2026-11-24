@@ -1,7 +1,6 @@
 variable "env_name" {
   description = "Nombre del entorno de preview "
   type        = string
-  default     = "pr-1"
 
   validation {
     condition     = can(regex("^pr-[0-9]+$", var.env_name))
